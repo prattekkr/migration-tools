@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AEM → EDS Migration Suite</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ══ TOP NAVBAR ══════════════════════════════════════════════════════════ -->
+<nav class="navbar navbar-dark px-4">
+  <div class="d-flex align-items-center gap-3">
+    <i class="bi bi-arrow-left-right fs-4 text-warning"></i>
+    <span class="navbar-brand mb-0 fw-semibold">AEM → EDS Migration Suite</span>
+  </div>
+  <div id="navStatus" class="text-secondary small"></div>
+  <ul class="nav nav-pills gap-1">
+    <li class="nav-item">
+      <button class="nav-link active" id="tool-btn-pkgupd" onclick="switchTool('pkgupd')">
+        <i class="bi bi-arrow-repeat me-1"></i>XMOD S7 Package Updater
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" id="tool-btn-meta" onclick="switchTool('meta')">
+        <i class="bi bi-card-list me-1"></i>Page Metadata
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" id="tool-btn-image" onclick="switchTool('image')">
+        <i class="bi bi-images me-1"></i>Image / Asset
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" id="tool-btn-linkchecker" onclick="switchTool('linkchecker')">
+        <i class="bi bi-link-45deg me-1"></i>Link Checker
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" id="tool-btn-pkg" onclick="switchTool('pkg')">
+        <i class="bi bi-box-seam me-1"></i>Package Creator
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" id="tool-btn-info" onclick="switchTool('info')">
+        <i class="bi bi-info-circle me-1"></i>How to Use
+      </button>
+    </li>
+  </ul>
+</nav>
+
+<!-- ══ PAGE METADATA TOOL ══════════════════════════════════════════════════ -->
+<div id="tool-meta" style="display:none">
+
+  <!-- Step tabs -->
+  <div class="step-bar px-4 d-flex gap-0">
+    <button class="step-btn active" data-tab="config" onclick="switchTab('config')">
+      <span class="step-num">1</span> Configure
+    </button>
+    <div class="step-divider"></div>
+    <button class="step-btn" data-tab="discover" onclick="switchTab('discover')">
+      <span class="step-num">2</span> Discover &amp; Map
+    </button>
+    <div class="step-divider"></div>
+    <button class="step-btn" data-tab="update" onclick="switchTab('update')">
+      <span class="step-num">3</span> Bulk Update
+    </button>
+  </div>
+
+  <div class="main-content px-4 py-4">
+
+    <!-- TAB 1: CONFIGURE -->
+    <div id="tab-config" class="tab-pane active">
+      <div class="row g-4">
+        <!-- Source AEM -->
+        <div class="col-md-6">
+          <div class="card h-100">
+            <div class="card-header d-flex align-items-center gap-2">
+              <i class="bi bi-database text-primary"></i>
+              <strong>Source AEM</strong>
+              <span class="badge bg-primary ms-auto">Read</span>
+            </div>
+            <div class="card-body">
+              <div class="mb-3">
+                <label class="form-label">Host URL</label>
+                <input type="text" class="form-control" id="srcHost" placeholder="https://aem-author.example.com" />
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Username</label>
+                <input type="text" class="form-control" id="srcUser" placeholder="admin" />
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Password</label>
+                <input type="password" class="form-control" id="srcPass" />
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Root Path</label>
+                <input type="text" class="form-control" id="srcRoot" placeholder="/content/site/us/en" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Target EDS -->
+        <div class="col-md-6">
+          <div class="card h-100">
+            <div class="card-header d-flex align-items-center gap-2">
+              <i class="bi bi-cloud-upload text-success"></i>
+              <strong>Target EDS</strong>
+              <span class="badge bg-success ms-auto">Write</span>
+            </div>
+            <div class="card-body">
+              <div class="mb-3">
+                <label class="form-label">Host URL</label>
+                <input type="text" class="form-control" id="tgtHost" placeholder="https://eds-author.example.com" />
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Username</label>
+                <input type="text" class="form-control" id="tgtUser" placeholder="admin" />
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Password</label>
+                <input type="password" class="form-control" id="tgtPass" />
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Root Path</label>
+                <input type="text" class="form-control" id="tgtRoot" placeholder="/content/eds-site/us/en" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2 mt-4">
+        <button class="btn btn-primary px-4" onclick="saveConfig()">
+          <i class="bi bi-save me-2"></i>Save Configuration
+        </button>
+        <button class="btn btn-outline-secondary" onclick="testConnections()">
+          <i class="bi bi-plug me-2"></i>Test Connections
+        </button>
+      </div>
+
+      <div id="configAlert" class="mt-3"></div>
+    </div>
+
+    <!-- TAB 2: DISCOVER & MAP -->
+    <div id="tab-discover" class="tab-pane" style="display:none">
+
+      <div class="card mb-4">
+        <div class="card-body d-flex align-items-center gap-3 flex-wrap">
+          <button class="btn btn-primary" id="discoverBtn" onclick="startDiscover()">
+            <i class="bi bi-search me-2"></i>Discover Pages &amp; Properties
+          </button>
+          <button class="btn btn-outline-secondary" onclick="exportCsv()" id="exportCsvBtn" style="display:none">
+            <i class="bi bi-download me-2"></i>Export Properties CSV
+          </button>
+          <div id="discoverStats" class="text-muted small ms-auto"></div>
+        </div>
+
+        <div id="discoverProgressWrap" class="px-3 pb-3" style="display:none">
+          <div class="progress" style="height:6px">
+            <div id="discoverProgress" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div>
+          </div>
+          <div id="discoverProgressLabel" class="text-muted small mt-1">Starting...</div>
+        </div>
+      </div>
+
+      <!-- Mapping table -->
+      <div id="mappingSection" style="display:none">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <div>
+            <h5 class="mb-0">Property Mapping</h5>
+            <div class="text-muted small">Map each AEM property to its EDS equivalent. Leave blank to skip.</div>
+          </div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-secondary" onclick="addCustomMapping()">
+              <i class="bi bi-plus me-1"></i>Add Custom Row
+            </button>
+            <button class="btn btn-sm btn-primary" onclick="saveMapping()">
+              <i class="bi bi-save me-1"></i>Save Mapping
+            </button>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <input type="text" class="form-control form-control-sm w-auto" id="propFilter"
+            placeholder="Filter properties..." oninput="filterMappingTable()" style="min-width:240px" />
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle" id="mappingTable">
+            <thead class="table-dark">
+              <tr>
+                <th style="width:25%">AEM Property</th>
+                <th style="width:25%">Sample Value</th>
+                <th style="width:25%">EDS Property Name</th>
+                <th style="width:20%">Transform</th>
+                <th style="width:5%"></th>
+              </tr>
+            </thead>
+            <tbody id="mappingBody"></tbody>
+          </table>
+        </div>
+
+        <div class="mt-3">
+          <button class="btn btn-primary px-4" onclick="saveMapping()">
+            <i class="bi bi-save me-2"></i>Save Mapping &amp; Continue
+          </button>
+        </div>
+        <div id="mappingAlert" class="mt-2"></div>
+      </div>
+    </div>
+
+    <!-- TAB 3: BULK UPDATE -->
+    <div id="tab-update" class="tab-pane" style="display:none">
+
+      <div class="card mb-4">
+        <div class="card-body d-flex align-items-center gap-3 flex-wrap">
+          <button class="btn btn-sm btn-outline-secondary" onclick="selectAll()">Select All</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="deselectAll()">Deselect All</button>
+          <input type="text" class="form-control form-control-sm" id="pageFilter"
+            placeholder="Filter pages..." oninput="filterPagesTable()" style="max-width:280px" />
+          <span id="selectionCount" class="text-muted small">0 pages selected</span>
+          <div class="ms-auto d-flex gap-2">
+            <button class="btn btn-outline-info px-3" onclick="verifyTargets()" id="verifyBtn">
+              <i class="bi bi-shield-check me-1"></i>Verify Targets
+            </button>
+            <button class="btn btn-warning px-3" onclick="previewUpdate()" id="previewBtn">
+              <i class="bi bi-eye me-1"></i>Preview
+            </button>
+            <button class="btn btn-success px-4" onclick="runUpdate()" id="runBtn">
+              <i class="bi bi-play-fill me-1"></i>Run Update
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pages table -->
+      <div class="table-responsive mb-4 pages-table-wrap">
+        <table class="table table-sm table-hover align-middle" id="pagesTable">
+          <thead class="table-dark sticky-top">
+            <tr>
+              <th style="width:40px">
+                <input type="checkbox" id="selectAllChk" onchange="toggleAll(this)" />
+              </th>
+              <th>AEM Page Path</th>
+              <th>Target EDS Path</th>
+              <th style="width:90px">Target</th>
+              <th style="width:90px">Props</th>
+              <th style="width:90px">Status</th>
+            </tr>
+          </thead>
+          <tbody id="pagesBody">
+            <tr><td colspan="6" class="text-center text-muted py-4">Run discovery first (Step 2)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Update progress -->
+      <div id="updateProgressSection" style="display:none">
+        <div class="card">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <strong>Update Progress</strong>
+            <button class="btn btn-sm btn-outline-secondary" onclick="exportLog()">
+              <i class="bi bi-download me-1"></i>Export Log
+            </button>
+          </div>
+          <div class="card-body">
+            <div class="d-flex gap-4 mb-3">
+              <div class="text-center">
+                <div class="fs-4 fw-bold text-primary" id="metaStatTotal">0</div>
+                <div class="text-muted small">Total</div>
+              </div>
+              <div class="text-center">
+                <div class="fs-4 fw-bold text-success" id="metaStatDone">0</div>
+                <div class="text-muted small">Done</div>
+              </div>
+              <div class="text-center">
+                <div class="fs-4 fw-bold text-danger" id="metaStatErrors">0</div>
+                <div class="text-muted small">Errors</div>
+              </div>
+              <div class="text-center">
+                <div class="fs-4 fw-bold text-warning" id="metaStatSkipped">0</div>
+                <div class="text-muted small">Skipped</div>
+              </div>
+            </div>
+            <div class="progress mb-2" style="height:10px">
+              <div id="updateProgressBar" class="progress-bar" style="width:0%"></div>
+            </div>
+            <div id="updateProgressLabel" class="text-muted small mb-3"></div>
+
+            <div class="table-responsive" style="max-height:280px;overflow-y:auto">
+              <table class="table table-sm table-hover align-middle">
+                <thead class="table-light sticky-top">
+                  <tr>
+                    <th>Page Path</th>
+                    <th style="width:100px">Status</th>
+                    <th>Message</th>
+                  </tr>
+                </thead>
+                <tbody id="updateLog"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main-content -->
+</div><!-- /#tool-meta -->
+
+
+<!-- ══ IMAGE / ASSET TOOL ════════════════════════════════════════════════════ -->
+<div id="tool-image" class="tool-image" style="display:none">
+
+  <div class="img-header">
+    <div class="img-logo">🔄</div>
+    <h1 class="img-title">AEM → Dynamic Media Migration <span class="img-subtitle">Open API URL Updater</span></h1>
+  </div>
+
+  <div class="img-page">
+
+    <!-- Step 1: Build CSV -->
+    <div class="img-card">
+      <div class="img-card-header">
+        <div class="img-step-num">1</div>
+        <h2 class="img-card-title">Build Asset CSV</h2>
+      </div>
+      <div class="img-card-body">
+
+        <div id="envSelectorWrap" style="display:none; margin-bottom:18px;">
+          <div class="img-field">
+            <label>Environment</label>
+            <select id="envSelect" onchange="onEnvChange()" class="img-select"></select>
+          </div>
+        </div>
+
+        <!-- Use AEM from meta config shortcut -->
+        <div style="margin-bottom:12px;">
+          <button class="img-btn img-btn-ghost" onclick="fillFromMetaConfig()" title="Pre-fill AEM URL and credentials from the Page Metadata config">
+            <i class="bi bi-arrow-left-right"></i> Use AEM from Page Metadata Config
+          </button>
+        </div>
+
+        <div class="csv-pill loading" id="csvPill">
+          <span class="dot dot-gray" id="csvDot"></span>
+          <span id="csvPillText">Checking CSV status…</span>
+        </div>
+
+        <div class="img-form-grid">
+          <div class="img-field img-span2">
+            <label>AEM Author URL</label>
+            <input type="text" id="aemUrl" placeholder="https://author-p157365-e1665873.adobeaemcloud.com" />
+          </div>
+          <div class="img-field">
+            <label>Username</label>
+            <input type="text" id="username" placeholder="admin" autocomplete="off" />
+          </div>
+          <div class="img-field">
+            <label>Password</label>
+            <input type="password" id="password" placeholder="••••••••" autocomplete="off" />
+          </div>
+          <div class="img-field">
+            <label>DAM Root Path</label>
+            <input type="text" id="damRoot" placeholder="/content/dam/abbv" />
+          </div>
+          <div class="img-field">
+            <label>DM Delivery Host</label>
+            <input type="text" id="dmHost" placeholder="delivery-p157365-e1665873.adobeaemcloud.com" />
+          </div>
+        </div>
+
+        <div class="img-btn-row">
+          <button class="img-btn img-btn-primary" id="buildBtn" onclick="buildCsv()">
+            <span>⬇</span> Build CSV
+          </button>
+          <button class="img-btn img-btn-ghost" id="refreshBtn" onclick="buildCsv()" style="display:none">
+            <span>↺</span> Refresh CSV
+          </button>
+        </div>
+
+        <div class="log-box" id="csvLog"></div>
+        <div class="img-banner" id="csvBanner"></div>
+
+      </div>
+    </div>
+
+    <!-- Step 2: Upload ZIP -->
+    <div class="img-card">
+      <div class="img-card-header">
+        <div class="img-step-num">2</div>
+        <h2 class="img-card-title">Upload ZIP</h2>
+      </div>
+      <div class="img-card-body">
+        <label class="upload-zone" id="uploadZone" onclick="document.getElementById('zipInput').click()">
+          <input type="file" accept=".zip" id="zipInput" onchange="onFileSelected(this)" style="display:none" />
+          <div class="upload-icon" id="uploadIcon">📦</div>
+          <div class="upload-title" id="uploadTitle">Click to browse for ZIP file</div>
+          <div class="upload-sub" id="uploadSub">Select the AEM package ZIP (e.g. test.zip)</div>
+        </label>
+        <div class="img-banner" id="fileReadyBanner"></div>
+      </div>
+    </div>
+
+    <!-- Step 3: Process ZIP -->
+    <div class="img-card" id="processCard" style="display:none">
+      <div class="img-card-header">
+        <div class="img-step-num">3</div>
+        <h2 class="img-card-title">Process ZIP</h2>
+      </div>
+      <div class="img-card-body">
+
+        <div style="margin-bottom:18px; border:1px solid #e5e7eb; border-radius:8px; padding:16px;">
+          <div style="font-size:13px; font-weight:600; color:#374151; margin-bottom:12px;">Environment Mode</div>
+
+          <div style="display:flex; gap:10px; margin-bottom:14px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; font-weight:400;">
+              <input type="radio" name="processingMode" value="shared" checked onchange="onModeChange()" />
+              <span>
+                <strong>Shared CSV</strong>
+                <span style="color:#6b7280; font-size:12px; display:block;">UUIDs are the same across envs — build CSV once, swap delivery domain</span>
+              </span>
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; font-weight:400; margin-left:20px;">
+              <input type="radio" name="processingMode" value="per-env" onchange="onModeChange()" />
+              <span>
+                <strong>Per-environment CSV</strong>
+                <span style="color:#6b7280; font-size:12px; display:block;">UUIDs differ — build a separate CSV per environment</span>
+              </span>
+            </label>
+          </div>
+
+          <div class="img-field" id="targetEnvWrap">
+            <label id="targetEnvLabel">Target Environment</label>
+            <select id="targetEnvSelect" class="img-select">
+              <option value="">— Select target environment —</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Root Path Remappings -->
+        <div style="margin-bottom:18px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+            <span style="font-size:13px; font-weight:600; color:#374151;">Root Path Remappings <span style="font-weight:400; color:#9ca3af;">(optional)</span></span>
+            <button class="img-btn img-btn-ghost" onclick="addRootRow()" style="padding:5px 12px; font-size:12px;">+ Add Row</button>
+          </div>
+          <div id="rootTable" style="display:none;">
+            <div style="display:grid; grid-template-columns:1fr 1fr 32px; gap:6px; margin-bottom:4px; padding:0 4px;">
+              <span style="font-size:11px; font-weight:600; color:#6b7280;">OLD ROOT PREFIX</span>
+              <span style="font-size:11px; font-weight:600; color:#6b7280;">NEW ROOT PREFIX</span>
+              <span></span>
+            </div>
+            <div id="rootRows"></div>
+          </div>
+          <div id="noRoots" style="font-size:12px; color:#9ca3af; padding:4px 0;">No root remappings defined.</div>
+        </div>
+
+        <!-- Custom Mappings -->
+        <div style="margin-bottom:18px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+            <span style="font-size:13px; font-weight:600; color:#374151;">Exact Path Mappings <span style="font-weight:400; color:#9ca3af;">(optional)</span></span>
+            <button class="img-btn img-btn-ghost" onclick="addMappingRow()" style="padding:5px 12px; font-size:12px;">+ Add Row</button>
+          </div>
+          <div id="imgMappingTable" style="display:none;">
+            <div style="display:grid; grid-template-columns:1fr 1fr 32px; gap:6px; margin-bottom:4px; padding:0 4px;">
+              <span style="font-size:11px; font-weight:600; color:#6b7280;">ORIGINAL PATH</span>
+              <span style="font-size:11px; font-weight:600; color:#6b7280;">NEW URL</span>
+              <span></span>
+            </div>
+            <div id="imgMappingRows"></div>
+          </div>
+          <div id="imgNoMappings" style="font-size:12px; color:#9ca3af; padding:4px 0;">No exact mappings — truly unmatched paths will be unchanged.</div>
+        </div>
+
+        <div class="img-btn-row">
+          <button class="img-btn img-btn-primary" id="processBtn" onclick="processZip()">
+            <span>⚙</span> Process ZIP
+          </button>
+          <button class="img-btn img-btn-ghost" id="changeZipBtn" onclick="changeZip()">↩ Change ZIP</button>
+        </div>
+
+        <div class="log-box" id="zipLog"></div>
+        <div class="img-banner" id="zipBanner"></div>
+
+        <div class="img-btn-row" id="downloadRow" style="display:none; margin-top:14px;">
+          <button class="img-btn img-btn-success" id="downloadBtn" onclick="downloadZip()">⬇ Download Updated ZIP</button>
+          <button class="img-btn img-btn-ghost" id="reportBtn" onclick="downloadReport()">📄 Download Report CSV</button>
+        </div>
+
+        <div class="results-wrap" id="resultsWrap" style="display:none">
+          <hr class="img-divider" />
+          <div class="stat-grid">
+            <div class="stat-card info">
+              <div class="stat-val" id="statTotal">—</div>
+              <div class="stat-label">References Found</div>
+            </div>
+            <div class="stat-card good">
+              <div class="stat-val" id="statReplaced">—</div>
+              <div class="stat-label">Replaced</div>
+            </div>
+            <div class="stat-card warn">
+              <div class="stat-val" id="statUnmatched">—</div>
+              <div class="stat-label">Unmatched</div>
+            </div>
+            <div class="stat-card neutral">
+              <div class="stat-val" id="statFiles">—</div>
+              <div class="stat-label">Files Updated</div>
+            </div>
+          </div>
+          <div class="unmatched-box" id="unmatchedBox" style="display:none">
+            <h4>⚠ Unmatched paths (not found in CSV)</h4>
+            <div class="unmatched-scroll" id="unmatchedList"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Step 4: Domain Swap Only -->
+    <div class="img-card">
+      <div class="img-card-header">
+        <div class="img-step-num" style="background:#7c3aed;">4</div>
+        <h2 class="img-card-title">Domain Swap Only <span style="font-size:12px; font-weight:400; color:#6b7280; margin-left:6px;">— already-processed ZIP, just change delivery host</span></h2>
+      </div>
+      <div class="img-card-body">
+
+        <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:7px; padding:11px 14px; margin-bottom:18px; font-size:13px; color:#1d4ed8; line-height:1.6;">
+          Use this when UUIDs are the same across environments. Upload a ZIP that already contains
+          DM Open API URLs and pick a target environment — the tool replaces every
+          <code style="font-size:11px; background:#dbeafe; padding:1px 5px; border-radius:3px;">https://&lt;old-delivery-host&gt;/adobe/assets/…</code>
+          URL with the selected environment's delivery host. No CSV required.
+        </div>
+
+        <label class="upload-zone" id="swapUploadZone" onclick="document.getElementById('swapZipInput').click()">
+          <input type="file" accept=".zip" id="swapZipInput" onchange="onSwapFileSelected(this)" style="display:none" />
+          <div class="upload-icon" id="swapUploadIcon">📦</div>
+          <div class="upload-title" id="swapUploadTitle">Click to browse for already-processed ZIP</div>
+          <div class="upload-sub" id="swapUploadSub">The ZIP should already contain DM Open API URLs</div>
+        </label>
+        <div class="img-banner" id="swapFileBanner"></div>
+
+        <div class="img-field" style="margin-top:14px; margin-bottom:18px; max-width:340px;">
+          <label>Target Environment</label>
+          <select id="swapTargetEnv" class="img-select">
+            <option value="">— Select target environment —</option>
+          </select>
+        </div>
+
+        <div class="img-btn-row">
+          <button class="img-btn img-btn-primary" id="swapBtn" onclick="swapDomainZip()" style="background:#7c3aed;">
+            <span>🔄</span> Swap Domain
+          </button>
+          <button class="img-btn img-btn-ghost" id="swapChangeBtn" onclick="changeSwapZip()">↩ Change ZIP</button>
+        </div>
+
+        <div class="log-box" id="swapLog"></div>
+        <div class="img-banner" id="swapBanner"></div>
+
+        <div class="img-btn-row" id="swapDownloadRow" style="display:none; margin-top:14px;">
+          <button class="img-btn img-btn-success" id="swapDownloadBtn" onclick="downloadSwapZip()">⬇ Download Swapped ZIP</button>
+          <button class="img-btn img-btn-ghost" id="swapReportBtn" onclick="downloadSwapReport()">📄 Download Report CSV</button>
+        </div>
+
+        <div class="results-wrap" id="swapResultsWrap" style="display:none">
+          <hr class="img-divider" />
+          <div class="stat-grid" style="grid-template-columns: repeat(3,1fr);">
+            <div class="stat-card info">
+              <div class="stat-val" id="swapStatTotal">—</div>
+              <div class="stat-label">DM URLs Found</div>
+            </div>
+            <div class="stat-card good">
+              <div class="stat-val" id="swapStatReplaced">—</div>
+              <div class="stat-label">Domains Replaced</div>
+            </div>
+            <div class="stat-card neutral">
+              <div class="stat-val" id="swapStatFiles">—</div>
+              <div class="stat-label">Files Updated</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div><!-- /.img-page -->
+</div><!-- /#tool-image -->
+
+
+<!-- ══ LINK CHECKER TOOL ══════════════════════════════════════════════════════ -->
+<div id="tool-linkchecker" style="display:none">
+  <div class="main-content main-content-full px-4 py-4">
+
+    <!-- Upload card -->
+    <div class="card mb-4">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="bi bi-link-45deg text-primary"></i>
+        <strong>Link Checker</strong>
+        <span class="text-muted small ms-2">Upload an AEM package ZIP to extract all links per page</span>
+      </div>
+      <div class="card-body">
+        <div class="lc-upload-zone" id="lcUploadZone" onclick="document.getElementById('lcZipInput').click()">
+          <input type="file" accept=".zip" id="lcZipInput" onchange="lcOnFileSelected(this)" style="display:none" />
+          <i class="bi bi-cloud-upload lc-upload-icon"></i>
+          <div class="lc-upload-title" id="lcUploadTitle">Click to browse for ZIP file</div>
+          <div class="lc-upload-sub" id="lcUploadSub">Select an AEM package ZIP (nested or flat)</div>
+        </div>
+
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+          <button class="btn btn-primary" id="lcCheckBtn" onclick="lcCheck()" disabled>
+            <i class="bi bi-search me-2"></i>Check Links
+          </button>
+          <button class="btn btn-outline-secondary" id="lcResetBtn" onclick="lcReset()" style="display:none">
+            <i class="bi bi-x me-1"></i>Reset
+          </button>
+          <div id="lcStatus" class="text-muted small"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Site Root Configuration -->
+    <div class="card mb-3" id="lcSiteRootCard">
+      <div class="card-header d-flex align-items-center justify-content-between"
+           style="cursor:pointer" onclick="lcToggleSiteRoots()">
+        <span>
+          <i class="bi bi-gear me-2 text-secondary"></i>
+          <strong>Site Root Configuration</strong>
+          <span class="text-muted small ms-2">— configure known roots to detect shortened page paths</span>
+        </span>
+        <i class="bi bi-chevron-up" id="lcSiteRootChevron" style="transition:transform 0.15s"></i>
+      </div>
+      <div id="lcSiteRootBody" class="card-body">
+        <p class="text-muted small mb-2">
+          Add your site content roots (e.g. <code>/content/abbvie-com/us/en</code>). Any link
+          starting with <code>/</code> but <em>not</em> starting with <code>/content/</code>
+          is automatically flagged as a <strong>Short Path</strong>.
+          Configured roots are used to show the suggested full path for each shortened link.
+        </p>
+        <div id="lcSiteRootList" class="mb-2"></div>
+        <div class="d-flex gap-2">
+          <input type="text" class="form-control form-control-sm" id="lcSiteRootInput"
+            placeholder="/content/site-name/us/en" style="max-width:340px"
+            onkeydown="if(event.key==='Enter') lcAddSiteRoot()" />
+          <button class="btn btn-sm btn-outline-primary" onclick="lcAddSiteRoot()">
+            <i class="bi bi-plus me-1"></i>Add Root
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results (hidden until checked) -->
+    <div id="lcResults" style="display:none">
+
+      <!-- Summary stats -->
+      <div class="row g-3 mb-4" id="lcStatCards"></div>
+
+      <!-- Fix Short Paths (shown only when short-path links exist) -->
+      <div class="card mb-3" id="lcFixCard" style="display:none">
+        <div class="card-header d-flex align-items-center gap-2" style="background:#f0f9ff;border-left:4px solid #0d6efd">
+          <i class="bi bi-tools text-primary"></i>
+          <strong>Fix Detected Issues</strong>
+          <span class="text-muted small ms-1">— patch the ZIP with selected fixes and download it</span>
+        </div>
+
+        <!-- Site root detection -->
+        <div class="lc-fix-section" style="border-bottom:1px solid #dee2e6">
+          <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+            <span class="fw-semibold small">Detected site root:</span>
+            <code id="lcDetectedRoot" class="lc-detected-root">(detecting…)</code>
+            <button class="btn btn-sm btn-link p-0 text-secondary" onclick="lcToggleRootOverride()" title="Override site root">
+              <i class="bi bi-pencil-square"></i>
+            </button>
+          </div>
+          <div id="lcRootOverrideWrap" style="display:none" class="mb-2">
+            <input type="text" class="form-control form-control-sm" id="lcRootOverride"
+              style="max-width:520px;font-family:monospace"
+              placeholder="/content/abbvie-nextgen-eds/corporate/abbvie-com" />
+            <div class="text-muted" style="font-size:0.75rem;margin-top:3px">Override the auto-detected site root — leave blank to use detected value</div>
+          </div>
+          <div class="text-muted" style="font-size:0.76rem">
+            <span class="me-1 fw-semibold">Locales detected in ZIP:</span>
+            <span id="lcDetectedLocales">—</span>
+          </div>
+          <div class="text-muted" style="font-size:0.73rem;margin-top:2px">
+            Each file's locale root is derived from its own path in the ZIP — no manual locale selection needed.
+          </div>
+        </div>
+
+        <!-- Short Paths section -->
+        <div class="lc-fix-section" id="lcFixSection-shortPath" style="display:none;border-bottom:1px solid #f0f0f0">
+          <div class="lc-fix-section-hdr">
+            <div class="form-check mb-0">
+              <input class="form-check-input" type="checkbox" id="lcFix-check-shortPath" checked />
+              <label class="form-check-label fw-semibold" for="lcFix-check-shortPath">
+                Short Paths <span class="badge lc-badge-shortpath ms-1" id="lcFixCount-shortPath">0</span>
+              </label>
+            </div>
+            <span class="text-muted small">Locale root prepended per-file based on its ZIP location</span>
+          </div>
+        </div>
+
+        <!-- Scene7 section -->
+        <div class="lc-fix-section" id="lcFixSection-scene7" style="display:none;border-bottom:1px solid #f0f0f0">
+          <div class="lc-fix-section-hdr">
+            <div class="form-check mb-0">
+              <input class="form-check-input" type="checkbox" id="lcFix-check-scene7" checked />
+              <label class="form-check-label fw-semibold" for="lcFix-check-scene7">
+                Scene7 URLs <span class="badge lc-badge-scene7 ms-1" id="lcFixCount-scene7">0</span>
+              </label>
+            </div>
+          </div>
+          <div class="ms-4">
+            <label class="form-label small mb-1">Asset map environment (from Image/Asset tool):</label>
+            <select class="form-select form-select-sm" id="lcFix-scene7-env" style="max-width:320px">
+              <option value="">— no CSV available —</option>
+            </select>
+            <div class="text-muted" style="font-size:0.75rem;margin-top:3px">
+              Matches each Scene7 asset name against the CSV and replaces with the DM Open API URL. Unmatched assets are left unchanged.
+            </div>
+          </div>
+        </div>
+
+        <!-- AbbVie Abs section -->
+        <div class="lc-fix-section" id="lcFixSection-abbvieAbs" style="display:none;border-bottom:1px solid #f0f0f0">
+          <div class="lc-fix-section-hdr">
+            <div class="form-check mb-0">
+              <input class="form-check-input" type="checkbox" id="lcFix-check-absBaseUrl" checked />
+              <label class="form-check-label fw-semibold" for="lcFix-check-absBaseUrl">
+                Absolute AbbVie URLs <span class="badge lc-badge-abbvieabs ms-1" id="lcFixCount-abbvieAbs">0</span>
+              </label>
+            </div>
+          </div>
+          <div class="ms-4">
+            <label class="form-label small mb-1">Base domain to strip:</label>
+            <input type="text" class="form-control form-control-sm" id="lcFix-absBaseUrl-domain"
+              value="abbvie.com" style="max-width:260px;font-family:monospace" />
+            <div class="text-muted" style="font-size:0.75rem;margin-top:3px">
+              Strips the domain and <code>.html</code> extension, then prepends the file's locale root.
+              Subdomains (e.g. <code>careers.abbvie.com</code>) are left unchanged.
+            </div>
+          </div>
+        </div>
+
+        <!-- DAM Normalization section (always visible) -->
+        <div class="lc-fix-section" style="border-bottom:1px solid #f0f0f0">
+          <div class="lc-fix-section-hdr">
+            <div class="form-check mb-0">
+              <input class="form-check-input" type="checkbox" id="lcFix-check-damPaths" checked />
+              <label class="form-check-label fw-semibold" for="lcFix-check-damPaths">
+                DAM Path Normalization
+              </label>
+            </div>
+            <span class="text-muted small">Rewrite incorrect DAM path prefixes to the correct root</span>
+          </div>
+          <div class="ms-4 row g-2">
+            <div class="col-md-5">
+              <label class="form-label small mb-1">Correct DAM root prefix:</label>
+              <input type="text" class="form-control form-control-sm" id="lcFix-dam-correct"
+                value="/content/dam/corporate/abbvie-com2" style="font-family:monospace" />
+            </div>
+            <div class="col-md-7">
+              <label class="form-label small mb-1">Replace these old prefixes <span class="text-muted">(comma-separated):</span></label>
+              <input type="text" class="form-control form-control-sm" id="lcFix-dam-old"
+                value="/content/dam/abbvie-com, /content/dam/abbvie-com2" style="font-family:monospace" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Fix All button -->
+        <div class="lc-fix-section">
+          <div class="d-flex align-items-center gap-3 flex-wrap">
+            <button class="btn btn-primary" id="lcFixAllBtn" onclick="lcFixIssues()">
+              <i class="bi bi-download me-2"></i>Fix All &amp; Download ZIP
+            </button>
+            <div id="lcFixStatus" class="small text-muted"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls bar -->
+      <div class="card mb-3">
+        <div class="card-body py-2 d-flex align-items-center gap-3 flex-wrap">
+          <!-- Type filter pills -->
+          <div class="d-flex gap-1 flex-wrap" id="lcTypeFilters">
+            <button class="btn btn-sm btn-primary lc-type-btn" data-type="all" onclick="lcSetTypeFilter('all')">All</button>
+            <button class="btn btn-sm btn-outline-secondary lc-type-btn" data-type="dam" onclick="lcSetTypeFilter('dam')">DAM</button>
+            <button class="btn btn-sm btn-outline-secondary lc-type-btn" data-type="internal" onclick="lcSetTypeFilter('internal')">Internal Pages</button>
+            <button class="btn btn-sm btn-outline-secondary lc-type-btn" data-type="external" onclick="lcSetTypeFilter('external')">External</button>
+            <button class="btn btn-sm btn-outline-secondary lc-type-btn" data-type="scene7" onclick="lcSetTypeFilter('scene7')">Scene7</button>
+            <button class="btn btn-sm btn-outline-secondary lc-type-btn" data-type="dm-openapi" onclick="lcSetTypeFilter('dm-openapi')">DM Open API</button>
+            <button class="btn btn-sm btn-outline-secondary lc-type-btn" data-type="aem-cloud" onclick="lcSetTypeFilter('aem-cloud')">AEM Cloud</button>
+            <button class="btn btn-sm btn-outline-danger lc-type-btn" data-type="abbvie-abs" onclick="lcSetTypeFilter('abbvie-abs')">
+              <i class="bi bi-exclamation-triangle me-1"></i>AbbVie (Abs)
+            </button>
+            <button class="btn btn-sm btn-outline-warning lc-type-btn" data-type="short-path" onclick="lcSetTypeFilter('short-path')">
+              <i class="bi bi-exclamation-triangle me-1"></i>Short Paths
+            </button>
+          </div>
+
+          <input type="text" class="form-control form-control-sm" id="lcSearch"
+            placeholder="Filter by file or URL..." oninput="lcApplyFilters()" style="max-width:280px" />
+
+          <div class="ms-auto">
+            <button class="btn btn-sm btn-outline-success" onclick="lcExportCsv()">
+              <i class="bi bi-download me-1"></i>Export CSV
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Files table -->
+      <div class="lc-table-wrap">
+        <table class="table table-sm table-hover align-middle mb-0" id="lcTable">
+          <thead class="table-dark sticky-top">
+            <tr>
+              <th style="width:36px"></th>
+              <th style="min-width:560px">File (XML)</th>
+              <th style="width:80px" class="text-center">Links</th>
+              <th style="width:80px" class="text-center">DAM</th>
+              <th style="width:90px" class="text-center">Internal</th>
+              <th style="width:80px" class="text-center">External</th>
+              <th style="width:80px" class="text-center">Scene7</th>
+              <th style="width:105px" class="text-center">DM Open API</th>
+              <th style="width:95px" class="text-center">AEM Cloud</th>
+              <th style="width:100px" class="text-center text-danger">AbbVie URL</th>
+              <th style="width:95px" class="text-center text-warning">Short Paths</th>
+            </tr>
+          </thead>
+          <tbody id="lcTableBody"></tbody>
+        </table>
+        <div id="lcNoResults" class="text-center text-muted py-5" style="display:none">No files match the current filter.</div>
+      </div>
+
+    </div><!-- /#lcResults -->
+  </div>
+</div><!-- /#tool-linkchecker -->
+
+<!-- ══ PACKAGE CREATOR TOOL ═════════════════════════════════════════════════ -->
+<div id="tool-pkg" style="display:none">
+  <div class="main-content px-4 py-4">
+
+    <!-- Step 1: Connection -->
+    <div class="card mb-3">
+      <div class="card-header d-flex align-items-center gap-2">
+        <span class="badge bg-primary rounded-pill">1</span>
+        <strong>AEM Connection</strong>
+        <span id="pkgConnStatus" class="small ms-2"></span>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-12">
+            <label class="form-label small fw-semibold">Host URL</label>
+            <input type="url" class="form-control form-control-sm" id="pkgHost"
+              value="http://localhost:4502" placeholder="http://localhost:4502" />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small fw-semibold">Username</label>
+            <input type="text" class="form-control form-control-sm" id="pkgUsername" value="admin" />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small fw-semibold">Password</label>
+            <input type="password" class="form-control form-control-sm" id="pkgPassword" placeholder="••••••••" />
+          </div>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm mt-3" id="pkgBtnTest" onclick="pkgTestConnection()">
+          <i class="bi bi-plug me-1"></i>Test Connection
+        </button>
+        <button class="btn btn-link btn-sm mt-3 text-decoration-none" type="button" onclick="pkgUseImageCreds()">
+          Use AEM from Image/Asset config
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 2: Package details -->
+    <div class="card mb-3">
+      <div class="card-header d-flex align-items-center gap-2">
+        <span class="badge bg-primary rounded-pill">2</span>
+        <strong>Package Details</strong>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label small fw-semibold">Package Name <span class="text-danger">*</span></label>
+            <input type="text" class="form-control form-control-sm" id="pkgName" placeholder="my-content-package" />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small fw-semibold">Group Name <span class="text-danger">*</span></label>
+            <input type="text" class="form-control form-control-sm" id="pkgGroup" value="my_packages" />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small fw-semibold">Version</label>
+            <input type="text" class="form-control form-control-sm" id="pkgVersion" value="1.0" />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small fw-semibold">Description</label>
+            <input type="text" class="form-control form-control-sm" id="pkgDesc" placeholder="Optional description" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Filter paths -->
+    <div class="card mb-3">
+      <div class="card-header d-flex align-items-center gap-2">
+        <span class="badge bg-primary rounded-pill">3</span>
+        <strong>Content Filter Paths</strong>
+      </div>
+      <div class="card-body">
+        <label class="form-label small fw-semibold mb-2">Default Filter Mode</label>
+        <div class="d-flex gap-3 flex-wrap mb-3" id="pkgModeGroup">
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="pkgGlobalMode" id="pkgModeReplace" value="replace" checked>
+            <label class="form-check-label" for="pkgModeReplace"><code>replace</code> <span class="text-muted small">— replaces existing content</span></label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="pkgGlobalMode" id="pkgModeMerge" value="merge">
+            <label class="form-check-label" for="pkgModeMerge"><code>merge</code> <span class="text-muted small">— adds new, keeps existing</span></label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="pkgGlobalMode" id="pkgModeUpdate" value="update">
+            <label class="form-check-label" for="pkgModeUpdate"><code>update</code> <span class="text-muted small">— only updates existing nodes</span></label>
+          </div>
+        </div>
+
+        <label class="form-label small fw-semibold">Content Paths
+          <span class="text-muted fw-normal">— one path per line, must start with <code>/</code></span>
+        </label>
+        <textarea class="form-control form-control-sm font-monospace" id="pkgPathsInput" rows="8"
+          placeholder="/content/mysite&#10;/content/dam/mysite&#10;/conf/mysite"></textarea>
+
+        <div class="d-flex align-items-center gap-3 mt-2">
+          <span class="text-muted small">— or —</span>
+          <label class="btn btn-outline-secondary btn-sm mb-0">
+            <i class="bi bi-upload me-1"></i>Upload .txt file
+            <input type="file" id="pkgFileUpload" accept=".txt" hidden />
+          </label>
+          <span id="pkgFileName" class="text-muted small"></span>
+        </div>
+
+        <div id="pkgPathPills" class="d-flex flex-wrap gap-2 mt-3"></div>
+      </div>
+    </div>
+
+    <!-- Step 4: Actions -->
+    <div class="card mb-3">
+      <div class="card-header d-flex align-items-center gap-2">
+        <span class="badge bg-primary rounded-pill">4</span>
+        <strong>Create Package</strong>
+      </div>
+      <div class="card-body d-flex gap-3 flex-wrap">
+        <button class="btn btn-primary" id="pkgBtnCreate" onclick="pkgRunCreate(false)">
+          <i class="bi bi-box-seam me-1"></i>Create &amp; Add Filters
+        </button>
+        <button class="btn btn-success" id="pkgBtnCreateBuild" onclick="pkgRunCreate(true)">
+          <i class="bi bi-hammer me-1"></i>Create, Add Filters &amp; Build
+        </button>
+      </div>
+    </div>
+
+    <!-- Progress log -->
+    <div class="card mb-3" id="pkgLogSection" style="display:none">
+      <div class="card-header"><strong>Progress</strong></div>
+      <div class="card-body">
+        <div id="pkgLogSteps" class="d-flex flex-column gap-2"></div>
+        <div id="pkgResultBanner" class="alert mt-3 mb-0" style="display:none"></div>
+      </div>
+    </div>
+
+  </div>
+</div><!-- /#tool-pkg -->
+
+<!-- ══ XMOD S7 PACKAGE UPDATER TOOL ═════════════════════════════════════════ -->
+<div id="tool-pkgupd">
+  <div class="main-content px-4 py-4">
+
+    <!-- Step 1: Upload -->
+    <div class="card mb-3">
+      <div class="card-header d-flex align-items-center gap-2">
+        <span class="badge bg-primary rounded-pill">1</span>
+        <strong>Upload Package ZIP</strong>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          Upload a content-package ZIP. A <strong>bundle</strong> (outer ZIP containing
+          <code>asset-mapping.json</code> + an inner content <code>.zip</code>) gets asset-reference
+          replacement automatically. A <strong>plain</strong> content ZIP can be moved to a new path —
+          and you may optionally attach an <code>asset-mapping.json</code> to also run replacement.
+        </p>
+        <div class="row g-3">
+          <div class="col-md-7">
+            <label class="form-label small fw-semibold">Package ZIP</label>
+            <input type="file" class="form-control form-control-sm" id="puFile" accept=".zip" />
+          </div>
+          <div class="col-md-5">
+            <label class="form-label small fw-semibold">Asset map <span class="text-muted fw-normal">(optional, for plain ZIPs)</span></label>
+            <input type="file" class="form-control form-control-sm" id="puMappingFile" accept=".json" />
+          </div>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm mt-3" id="puInspectBtn" onclick="puInspect()">
+          <i class="bi bi-search me-1"></i>Inspect
+        </button>
+        <span id="puInspectStatus" class="small ms-2"></span>
+      </div>
+    </div>
+
+    <!-- Step 2: Inspect results + target -->
+    <div class="card mb-3" id="puResultsCard" style="display:none">
+      <div class="card-header d-flex align-items-center gap-2">
+        <span class="badge bg-primary rounded-pill">2</span>
+        <strong>Detected</strong>
+      </div>
+      <div class="card-body">
+        <div class="row g-2 small mb-3">
+          <div class="col-md-3 fw-semibold">Input type</div>
+          <div class="col-md-9"><span id="puIsBundle" class="badge bg-secondary">—</span> <span id="puInnerZip" class="text-muted ms-2"></span></div>
+          <div class="col-md-3 fw-semibold">Detected source path</div>
+          <div class="col-md-9"><code id="puSourcePath" class="lc-detected-root">—</code></div>
+          <div class="col-md-3 fw-semibold">Asset replacements</div>
+          <div class="col-md-9"><span id="puAssetCount">0</span> mapping entr(ies)</div>
+        </div>
+        <hr>
+        <label class="form-label small fw-semibold">Move to target JCR path <span class="text-muted fw-normal">(optional)</span></label>
+        <input type="text" class="form-control form-control-sm font-monospace" id="puTargetPath"
+          placeholder="/content/abbvie-nextgen-eds/corporate/language-masters/en" />
+        <div class="text-muted" style="font-size:0.75rem;margin-top:3px">
+          Leave blank to only run asset replacement (bundle / attached mapping). Entries under the detected
+          source path are relocated here, path strings inside files are rewritten, and intermediate
+          <code>cq:Page</code> nodes are created.
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Process -->
+    <div class="card mb-3" id="puProcessCard" style="display:none">
+      <div class="card-header d-flex align-items-center gap-2">
+        <span class="badge bg-primary rounded-pill">3</span>
+        <strong>Process</strong>
+      </div>
+      <div class="card-body">
+        <button class="btn btn-primary" id="puProcessBtn" onclick="puProcess()">
+          <i class="bi bi-arrow-repeat me-1"></i>Process &amp; Download ZIP
+        </button>
+        <div id="puStatus" class="small mt-2"></div>
+        <pre id="puLog" class="small bg-light border rounded p-2 mt-2 mb-0" style="display:none;max-height:280px;overflow:auto"></pre>
+      </div>
+    </div>
+
+  </div>
+</div><!-- /#tool-pkgupd -->
+
+<!-- ══ HOW TO USE ════════════════════════════════════════════════════════════ -->
+<div id="tool-info" style="display:none">
+  <div class="main-content px-4 py-4">
+
+    <!-- Hero -->
+    <div class="card mb-4" style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);color:#fff;border:none">
+      <div class="card-body py-4 px-5">
+        <div class="d-flex align-items-center gap-3 mb-2">
+          <i class="bi bi-arrow-left-right fs-2 text-warning"></i>
+          <div>
+            <h4 class="mb-0 fw-bold">AEM → EDS Migration Suite</h4>
+            <div class="text-white-50 small">Five tools for migrating AEM content to Edge Delivery Services</div>
+          </div>
+        </div>
+        <div class="row g-3 mt-1">
+          <div class="col-auto"><span class="badge bg-white text-dark"><i class="bi bi-arrow-repeat me-1"></i>XMOD S7 Package Updater</span></div>
+          <div class="col-auto"><span class="badge bg-white text-dark"><i class="bi bi-card-list me-1"></i>Page Metadata</span></div>
+          <div class="col-auto"><span class="badge bg-white text-dark"><i class="bi bi-images me-1"></i>Image / Asset</span></div>
+          <div class="col-auto"><span class="badge bg-white text-dark"><i class="bi bi-link-45deg me-1"></i>Link Checker</span></div>
+          <div class="col-auto"><span class="badge bg-white text-dark"><i class="bi bi-box-seam me-1"></i>Package Creator</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tool cards -->
+    <div class="row g-4">
+
+      <!-- ── XMOD S7 Package Updater ── -->
+      <div class="col-12">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center gap-2" style="background:#eef7ff;border-left:4px solid #0d6efd">
+            <i class="bi bi-arrow-repeat fs-5 text-primary"></i>
+            <strong class="text-primary">XMOD S7 Package Updater</strong>
+            <span class="badge bg-secondary ms-2">ZIP → ZIP rewrite</span>
+          </div>
+          <div class="card-body">
+            <p class="text-muted mb-3">
+              Post-processes a downloaded content-package ZIP: swaps DAM paths back to original asset URLs
+              (via <code>asset-mapping.json</code>) and/or relocates the JCR content to a new target path —
+              auto-detecting the source path from <code>META-INF/vault/filter.xml</code>.
+            </p>
+            <div class="row g-4">
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-list-ol me-2 text-primary"></i>Steps</h6>
+                <ol class="small text-muted ps-3" style="line-height:1.8">
+                  <li><strong>Upload:</strong> Select a bundle ZIP (with <code>asset-mapping.json</code> + inner content zip) or a plain content ZIP. Optionally attach an <code>asset-mapping.json</code> for a plain ZIP.</li>
+                  <li><strong>Inspect:</strong> See whether it's a bundle, the detected source path, and how many asset replacements will run.</li>
+                  <li><strong>Target (optional):</strong> Enter a target JCR path to move the content; leave blank to only replace asset references.</li>
+                  <li><strong>Process:</strong> Download the updated ZIP. The change log lists every modified, sanitized, and created entry.</li>
+                </ol>
+              </div>
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-lightbulb me-2 text-warning"></i>Notes</h6>
+                <ul class="small text-muted ps-3" style="line-height:1.8">
+                  <li><strong>Asset replacement</strong> maps <code>damPath → url</code> (the inverse of the Image/Asset tool) and runs for bundles or an attached mapping.</li>
+                  <li><strong>Path move</strong> renames <code>jcr_root{source}</code> → <code>jcr_root{target}</code>, rewrites path strings in files (incl. <code>filter.xml</code>), and creates intermediate <code>cq:Page</code> nodes.</li>
+                  <li>Binary assets are copied untouched; bare <code>&amp;</code> in XML is escaped to <code>&amp;amp;</code>.</li>
+                  <li>This tool intentionally edits package metadata when moving — that's required for the new filter roots.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Page Metadata ── -->
+      <div class="col-12">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center gap-2" style="background:#f0f4ff;border-left:4px solid #1a1a2e">
+            <i class="bi bi-card-list fs-5" style="color:#1a1a2e"></i>
+            <strong style="color:#1a1a2e">Page Metadata Migration</strong>
+            <span class="badge bg-secondary ms-2">AEM → EDS</span>
+          </div>
+          <div class="card-body">
+            <p class="text-muted mb-3">
+              Reads page properties from AEM author and writes the mapped values into Edge Delivery Services (EDS)
+              metadata sheets. Useful for bulk-migrating titles, descriptions, tags, and any custom properties
+              without touching each page manually.
+            </p>
+
+            <div class="row g-4">
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-list-ol me-2 text-primary"></i>Steps</h6>
+                <ol class="small text-muted ps-3" style="line-height:1.8">
+                  <li><strong>Step 1 — Configure:</strong> Enter your AEM Author URL + credentials and the target EDS SharePoint / Drive URL. Click <em>Save Config</em>, then <em>Test Connections</em> to verify both are reachable.</li>
+                  <li><strong>Step 2 — Discover &amp; Map:</strong> Enter one or more AEM root paths (e.g. <code>/content/abbvie-com</code>) and click <em>Discover Pages</em>. The tool streams all pages via AEM QueryBuilder. Once done, map each AEM property to its EDS column name. Optionally apply a transform (uppercase, lowercase, date format, etc.).</li>
+                  <li><strong>Step 3 — Bulk Update:</strong> Review the discovered pages, check / uncheck individual pages, then click <em>Start Bulk Update</em>. Progress is streamed live. Download the CSV or log when finished.</li>
+                </ol>
+              </div>
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-lightbulb me-2 text-warning"></i>Tips &amp; Notes</h6>
+                <ul class="small text-muted ps-3" style="line-height:1.8">
+                  <li>Credentials are saved to <code>config.json</code> on the server — no need to re-enter each session.</li>
+                  <li>Property mappings are saved to <code>mapping.json</code> and persist across sessions.</li>
+                  <li>Use <em>Preview Update</em> on a single page before running the full bulk update.</li>
+                  <li>AEM SSL errors are suppressed automatically (<code>rejectUnauthorized: false</code>).</li>
+                  <li>The EDS URL must point to the <code>metadata</code> sheet of your SharePoint workbook.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Image / Asset ── -->
+      <div class="col-12">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center gap-2" style="background:#fff8f0;border-left:4px solid #fd7e14">
+            <i class="bi bi-images fs-5 text-warning"></i>
+            <strong style="color:#c45e00">Image / Asset Migration</strong>
+            <span class="badge bg-secondary ms-2">DAM → Dynamic Media</span>
+          </div>
+          <div class="card-body">
+            <p class="text-muted mb-3">
+              Rewrites AEM DAM asset URLs inside an EDS HTML/JSON ZIP package to Dynamic Media Open API (DM) URLs.
+              Supports multi-environment configs (dev / stage / prod) and custom path mappings.
+            </p>
+
+            <div class="row g-4">
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-list-ol me-2 text-primary"></i>Steps</h6>
+                <ol class="small text-muted ps-3" style="line-height:1.8">
+                  <li><strong>Step 1 — Environment:</strong> Pick a mode (<em>AEM to DM</em> or <em>Domain Swap</em>) and select the target environment. Use <em>Use AEM from Page Metadata Config</em> to auto-fill AEM credentials.</li>
+                  <li><strong>Step 2 — Asset CSV:</strong> Click <em>Build CSV</em> to query AEM DAM and generate a mapping of old DAM paths → new DM URLs. The status pill shows whether a CSV already exists for the environment.</li>
+                  <li><strong>Step 3 — Upload ZIP:</strong> Upload your EDS output ZIP. Add root path mappings if your DAM paths differ between environments. Click <em>Process ZIP</em> to rewrite all asset references.</li>
+                  <li><strong>Step 4 — Download:</strong> Download the patched ZIP and a change report CSV. For <em>Domain Swap</em> mode, upload the ZIP and enter old / new domain strings.</li>
+                </ol>
+              </div>
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-lightbulb me-2 text-warning"></i>Tips &amp; Notes</h6>
+                <ul class="small text-muted ps-3" style="line-height:1.8">
+                  <li>Environment configs live in <code>site.config.json</code>. Edit it to add new environments or change DM delivery domains.</li>
+                  <li>The asset CSV is cached per environment in <code>data/</code>. Rebuild it only when DAM assets change.</li>
+                  <li>Root mappings let you strip or replace a DAM path prefix before looking up the DM URL (useful when dev/stage paths differ from prod).</li>
+                  <li>Custom mappings let you hard-code specific DAM path → DM URL pairs that override the CSV.</li>
+                  <li>Build logs stream in real time. Scroll the log box to see per-file results.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Link Checker ── -->
+      <div class="col-12">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center gap-2" style="background:#f0fff4;border-left:4px solid #198754">
+            <i class="bi bi-link-45deg fs-5 text-success"></i>
+            <strong style="color:#198754">Link Checker</strong>
+            <span class="badge bg-secondary ms-2">AEM Package → Link Audit</span>
+          </div>
+          <div class="card-body">
+            <p class="text-muted mb-3">
+              Scans every XML file inside an AEM content package ZIP and extracts all links, classifying them
+              by type. Flags links that need attention — shortened paths that skip the <code>/content/</code>
+              prefix, and absolute AbbVie URLs that should be relative.
+            </p>
+
+            <div class="row g-4">
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-list-ol me-2 text-primary"></i>Steps</h6>
+                <ol class="small text-muted ps-3" style="line-height:1.8">
+                  <li><strong>Configure Site Roots:</strong> Before checking, expand <em>Site Root Configuration</em> and add your content roots (e.g. <code>/content/abbvie-com/us/en</code>). These persist in the browser and are used to suggest correct full paths.</li>
+                  <li><strong>Upload ZIP:</strong> Click the upload zone and select an AEM package ZIP (supports nested outer→inner ZIP structures).</li>
+                  <li><strong>Check Links:</strong> Click <em>Check Links</em>. The server scans all XML files and returns a full link inventory with counts per type.</li>
+                  <li><strong>Review Results:</strong> Use the filter pills to focus on a specific type. Expand any file row to see individual links. Search by file name or URL.</li>
+                  <li><strong>Fix Short Paths:</strong> If short paths are detected, a <em>Fix &amp; Download ZIP</em> panel appears. Select a site root prefix and download the patched ZIP with all short paths corrected.</li>
+                  <li><strong>Export:</strong> Click <em>Export CSV</em> to download the full link report (respects the current type filter).</li>
+                </ol>
+              </div>
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-tags me-2 text-primary"></i>Link Types</h6>
+                <div class="small" style="line-height:2">
+                  <div><span class="badge lc-badge-dam me-2">DAM</span> <span class="text-muted">Links starting with <code>/content/dam/</code> — DAM asset references</span></div>
+                  <div><span class="badge lc-badge-internal me-2">Internal</span> <span class="text-muted">Page links starting with <code>/content/</code> (non-DAM)</span></div>
+                  <div><span class="badge lc-badge-external me-2">External</span> <span class="text-muted">Absolute <code>https://</code> links to third-party domains</span></div>
+                  <div><span class="badge lc-badge-scene7 me-2">Scene7</span> <span class="text-muted">Classic Scene7 URLs (<code>*.scene7.com</code>, <code>/is/image/</code>)</span></div>
+                  <div><span class="badge lc-badge-dmopenapi me-2">DM Open API</span> <span class="text-muted">Dynamic Media Open API — <code>delivery-p{n}-e{n}</code> or <code>/adobe/assets/</code> URLs</span></div>
+                  <div><span class="badge lc-badge-aemcloud me-2">AEM Cloud</span> <span class="text-muted">Links pointing to <code>adobeaemcloud.com</code> or <code>adobe.com</code></span></div>
+                  <div><span class="badge lc-badge-abbvieabs me-2">AbbVie (Abs)</span> <span class="text-muted">Absolute <code>abbvie.com</code> / <code>www.abbvie.com</code> links — should be relative</span></div>
+                  <div><span class="badge lc-badge-shortpath me-2">Short Path</span> <span class="text-muted">Paths like <code>/who-we-are/page</code> missing the <code>/content/</code> prefix</span></div>
+                </div>
+                <div class="mt-3">
+                  <h6 class="fw-semibold mb-2"><i class="bi bi-lightbulb me-2 text-warning"></i>Tips</h6>
+                  <ul class="small text-muted ps-3" style="line-height:1.8">
+                    <li>JCR / Sling XML namespace URIs (e.g. <code>http://www.jcp.org/jcr/1.0</code>) are automatically excluded.</li>
+                    <li>The fixer only patches short paths — DAM, internal, and external links are left unchanged.</li>
+                    <li>After fixing, the original session expires. Re-upload to fix again or use a different prefix.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Package Creator ── -->
+      <div class="col-12">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center gap-2" style="background:#f5f0ff;border-left:4px solid #6f42c1">
+            <i class="bi bi-box-seam fs-5" style="color:#6f42c1"></i>
+            <strong style="color:#6f42c1">Package Creator</strong>
+            <span class="badge bg-secondary ms-2">Package Manager API</span>
+          </div>
+          <div class="card-body">
+            <p class="text-muted mb-3">
+              Bulk-creates an AEM content package and applies a set of workspace filter roots via the
+              Package Manager API — then optionally builds it. Useful for assembling an export package
+              over many content paths without hand-editing <code>filter.xml</code>.
+            </p>
+            <div class="row g-4">
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-list-ol me-2 text-primary"></i>Steps</h6>
+                <ol class="small text-muted ps-3" style="line-height:1.8">
+                  <li><strong>Connection:</strong> Enter the AEM author host, username and password and click <em>Test Connection</em>. Use <em>Use AEM from Image/Asset config</em> to pre-fill the host.</li>
+                  <li><strong>Package Details:</strong> Set the package name, group, version and optional description.</li>
+                  <li><strong>Filter Paths:</strong> Pick the default filter mode, then paste content paths (one per line) or upload a <code>.txt</code> file. Each path becomes a filter root.</li>
+                  <li><strong>Create:</strong> Click <em>Create &amp; Add Filters</em>, or <em>Create, Add Filters &amp; Build</em> to also build. Progress streams live; a link to the package opens it in Package Manager.</li>
+                </ol>
+              </div>
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-lightbulb me-2 text-warning"></i>Notes</h6>
+                <ul class="small text-muted ps-3" style="line-height:1.8">
+                  <li>Filter modes: <code>replace</code> (replaces existing content), <code>merge</code> (adds new, keeps existing), <code>update</code> (only updates existing nodes).</li>
+                  <li>Only lines starting with <code>/</code> are treated as paths; everything else is ignored.</li>
+                  <li>Self-signed AEM SSL certificates are accepted automatically.</li>
+                  <li>The package is created under <code>/etc/packages/{group}</code> using the name and group you provide.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /row -->
+  </div>
+</div><!-- /#tool-info -->
+
+<!-- Preview modal (meta tool) -->
+<div class="modal fade" id="previewModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Preview Changes</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <table class="table table-sm table-bordered mb-0">
+          <thead class="table-dark sticky-top">
+            <tr>
+              <th>Page Path</th>
+              <th>AEM Property</th>
+              <th>AEM Value (Source)</th>
+              <th>EDS Property</th>
+              <th>EDS Value (Target)</th>
+            </tr>
+          </thead>
+          <tbody id="previewModalBody"></tbody>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button class="btn btn-success" onclick="runUpdate(); bootstrap.Modal.getInstance(document.getElementById('previewModal')).hide()">
+          <i class="bi bi-play-fill me-1"></i>Run Update
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

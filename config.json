@@ -1,0 +1,14 @@
+{
+  "source": {
+    "host": "https://34.225.5.238",
+    "username": "migration1",
+    "password": "migration",
+    "rootPath": "/content/abbvie-com2/us/en"
+  },
+  "target": {
+    "host": "https://author-p157365-e1665873.adobeaemcloud.com",
+    "username": "migration",
+    "password": "migration",
+    "rootPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/us/en"
+  }
+}

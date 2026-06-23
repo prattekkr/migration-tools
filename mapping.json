@@ -1,0 +1,57 @@
+[
+  {
+    "aem": "cq:tags",
+    "eds": "cq:tags",
+    "transform": "aem-tag-to-eds"
+  },
+  {
+    "aem": "ctaAltText",
+    "eds": "ctaAltText"
+  },
+  {
+    "aem": "ctaText",
+    "eds": "ctaText"
+  },
+  {
+    "aem": "description",
+    "eds": "jcr:description"
+  },
+  {
+    "aem": "eyebrow",
+    "eds": "eyebrowText"
+  },
+  {
+    "aem": "fileReference",
+    "eds": "cardImage",
+    "transform": "dam-path-to-eds"
+  },
+  {
+    "aem": "hideInNav",
+    "eds": "hideFromNavigation"
+  },
+  {
+    "aem": "jcr:title",
+    "eds": "cardTitle"
+  },
+  {
+    "aem": "navTitle",
+    "eds": "navTitle"
+  },
+  {
+    "aem": "ogimage",
+    "eds": "image",
+    "transform": "dam-path-to-eds"
+  },
+  {
+    "aem": "readTime",
+    "eds": "storyReadTime"
+  },
+  {
+    "aem": "readWatchTimeSel",
+    "eds": "readWatchTime"
+  },
+  {
+    "aem": "title",
+    "eds": "jcr:title"
+  }
+]
