@@ -14,7 +14,7 @@
   },
   {
     "aem": "description",
-    "eds": "jcr:description"
+    "eds": "cardDescription"
   },
   {
     "aem": "eyebrow",

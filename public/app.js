@@ -975,13 +975,16 @@ function swapDomainZip() {
       if (data.success) {
         swapOutputFilename = data.outputFile;
         swapReportFilename = data.reportFile;
-        const { total, replaced, filesProcessed } = data.stats;
+        const { total, replaced, skipped = 0, filesProcessed } = data.stats;
         document.getElementById('swapStatTotal').textContent    = total.toLocaleString();
         document.getElementById('swapStatReplaced').textContent = replaced.toLocaleString();
         document.getElementById('swapStatFiles').textContent    = filesProcessed.toLocaleString();
         show('swapResultsWrap');
         show('swapDownloadRow');
-        showBanner('swapBanner', 'success', `✓ Domain swapped to "${targetEnv}" — ${replaced} URL(s) updated across ${filesProcessed} file(s).`);
+        const skipNote = skipped > 0
+          ? ` ${skipped.toLocaleString()} already on "${targetEnv}" — left unchanged (see report, status column).`
+          : '';
+        showBanner('swapBanner', 'success', `✓ Domain swapped to "${targetEnv}" — ${replaced} URL(s) updated across ${filesProcessed} file(s).${skipNote}`);
       } else {
         showBanner('swapBanner', 'error', `Error: ${data.error}`);
       }
@@ -1394,7 +1397,29 @@ async function lcRenderFixPanel(stats) {
     if (badge) badge.textContent = absCount;
   }
 
+  lcLoadValidateEnvs();
   document.getElementById('lcFixStatus').textContent = '';
+}
+
+function lcToggleValidate() {
+  const on = document.getElementById('lcFix-check-validate')?.checked;
+  const fields = document.getElementById('lcValidateFields');
+  if (fields) fields.style.display = on ? '' : 'none';
+}
+
+// Populate the validation environment dropdown from site.config
+async function lcLoadValidateEnvs() {
+  const sel = document.getElementById('lcFix-validate-env');
+  if (!sel) return;
+  try {
+    const res  = await fetch('/api/image/site-config');
+    const data = await res.json();
+    const envs = (data.environments || []).filter(e => e.aemUrl);
+    sel.innerHTML = '<option value="">— select —</option>' +
+      envs.map(e => `<option value="${escHtml(e.name)}">${escHtml(e.name)} (${escHtml(e.aemUrl.replace(/^https?:\/\//, ''))})</option>`).join('');
+  } catch {
+    sel.innerHTML = '<option value="">— could not load environments —</option>';
+  }
 }
 
 // Populate the Scene7 CSV environment dropdown from the Image/Asset tool's csv-status
@@ -1460,10 +1485,26 @@ async function lcFixIssues() {
       fixes.damPaths = { correctRoot, oldRoots };
     }
   }
+  if (document.getElementById('lcFix-check-validate')?.checked) {
+    const env = document.getElementById('lcFix-validate-env')?.value;
+    if (!env) {
+      const s = document.getElementById('lcFixStatus');
+      s.textContent = 'Select an AEM environment for validation — or uncheck "Validate rewritten URLs".';
+      s.className = 'small text-danger fw-semibold';
+      return;
+    }
+    fixes.validate = {
+      env,
+      username: document.getElementById('lcFix-validate-user')?.value || '',
+      password: document.getElementById('lcFix-validate-pass')?.value || '',
+    };
+  }
 
   const btn = document.getElementById('lcFixAllBtn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Processing…';
+  btn.innerHTML = fixes.validate
+    ? '<span class="spinner-border spinner-border-sm me-2"></span>Processing &amp; validating…'
+    : '<span class="spinner-border spinner-border-sm me-2"></span>Processing…';
   const status = document.getElementById('lcFixStatus');
   status.textContent = '';
   status.className = 'small text-muted';
@@ -1483,6 +1524,9 @@ async function lcFixIssues() {
     const fixedCount      = res.headers.get('X-Fixed-Count')      || '0';
     const unmatchedScene7 = res.headers.get('X-Unmatched-Scene7') || '0';
     const changeCount     = res.headers.get('X-Change-Count')     || '0';
+    const headChecked     = res.headers.get('X-Head-Checked')     || '0';
+    const head404         = res.headers.get('X-Head-404')         || '0';
+    const headErrors      = res.headers.get('X-Head-Errors')      || '0';
     const reportId        = res.headers.get('X-Report-Id')        || '';
 
     const blob = await res.blob();
@@ -1494,6 +1538,11 @@ async function lcFixIssues() {
     let msg = `Done — ${fixedCount} file(s) patched, ${changeCount} URL(s) rewritten. ZIP download started.`;
     if (parseInt(unmatchedScene7, 10) > 0) {
       msg += ` ${unmatchedScene7} Scene7 URL(s) had no CSV match and were left unchanged.`;
+    }
+    if (parseInt(headChecked, 10) > 0) {
+      msg += ` Validated ${headChecked} URL(s): ${head404} returned 404`;
+      msg += parseInt(headErrors, 10) > 0 ? `, ${headErrors} errored.` : '.';
+      msg += ' Filter the report by head_status to review.';
     }
     status.innerHTML = `${escHtml(msg)}` + (reportId
       ? ` <a href="/api/link-checker/fix-report/${encodeURIComponent(reportId)}" download="fix-change-report.csv" class="ms-1"><i class="bi bi-filetype-csv me-1"></i>Download change report (old → new URLs)</a>`

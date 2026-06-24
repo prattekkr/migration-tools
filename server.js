@@ -901,8 +901,10 @@ app.post('/api/image/swap-domain', upload.single('zip'), async (req, res) => {
     const allEntries = Object.keys(workingJszip.files);
     log(`ZIP has ${allEntries.length} entries`);
 
-    const domainRe = /(https?:\/\/)([^/'"]+)(\/adobe\/assets\/)/g;
-    let xmlFilesFound = 0, totalRefs = 0, replaced = 0, filesProcessed = 0;
+    // Capture the full DM URL (host + asset path) so the report shows the complete old/new URL.
+    // Stops at a quote, whitespace, angle bracket, or entity boundary (&) for entity-encoded XML.
+    const domainRe = /(https?:\/\/)([^/'"]+)(\/adobe\/assets\/[^'"<>\s&\\]*)/g;
+    let xmlFilesFound = 0, totalRefs = 0, replaced = 0, skipped = 0, filesProcessed = 0;
     const reportRows = [];
 
     for (const [filename, file] of Object.entries(workingJszip.files)) {
@@ -910,31 +912,32 @@ app.post('/api/image/swap-domain', upload.single('zip'), async (req, res) => {
       xmlFilesFound++;
 
       const original = await file.async('string');
-      let content    = original;
+      let fileChanged = false;
 
-      content = content.replace(domainRe, (match, proto, oldHost, rest) => {
+      const content = original.replace(domainRe, (match, proto, oldHost, rest) => {
         totalRefs++;
-        if (oldHost === newDmHost) return match;
+        const oldUrl = `${proto}${oldHost}${rest}`;
+        if (oldHost === newDmHost) {
+          // Already pointing at the target environment — left unchanged, but still reported.
+          skipped++;
+          reportRows.push({ xmlFile: filename, oldUrl, newUrl: oldUrl, status: 'skipped (already on target host)' });
+          return match;
+        }
         replaced++;
-        return `${proto}${newDmHost}${rest}`;
+        const newUrl = `${proto}${newDmHost}${rest}`;
+        reportRows.push({ xmlFile: filename, oldUrl, newUrl, status: 'replaced' });
+        fileChanged = true;
+        return newUrl;
       });
 
-      if (content !== original) {
-        const oldUrls = [...original.matchAll(/(https?:\/\/[^/'"]+\/adobe\/assets\/[^'"]+)/g)].map(m => m[1]);
-        const newUrls = [...content.matchAll(/(https?:\/\/[^/'"]+\/adobe\/assets\/[^'"]+)/g)].map(m => m[1]);
-        oldUrls.forEach((oldUrl, i) => {
-          if (oldUrl !== (newUrls[i] || '')) {
-            reportRows.push({ xmlFile: filename, oldUrl, newUrl: newUrls[i] || '' });
-          }
-        });
-
+      if (fileChanged) {
         workingJszip.file(filename, content);
         filesProcessed++;
         log(`Updated: ${filename}`);
       }
     }
 
-    log(`XML files scanned: ${xmlFilesFound} | DM URL references found: ${totalRefs} | Replaced: ${replaced}`);
+    log(`XML files scanned: ${xmlFilesFound} | DM URL references found: ${totalRefs} | Replaced: ${replaced} | Skipped (already on target): ${skipped}`);
     log(`Report rows: ${reportRows.length}`);
 
     log('Rebuilding ZIP...');
@@ -963,6 +966,7 @@ app.post('/api/image/swap-domain', upload.single('zip'), async (req, res) => {
           { key: 'xmlFile', header: 'xmlFile' },
           { key: 'oldUrl',  header: 'oldUrl'  },
           { key: 'newUrl',  header: 'newUrl'  },
+          { key: 'status',  header: 'status'  },
         ],
       }),
       'utf8'
@@ -974,7 +978,7 @@ app.post('/api/image/swap-domain', upload.single('zip'), async (req, res) => {
       outputFile: outputFilename,
       reportFile: reportFilename,
       logs,
-      stats: { total: totalRefs, replaced, filesProcessed },
+      stats: { total: totalRefs, replaced, skipped, filesProcessed },
     });
   } catch (err) {
     log(`Error: ${err.message}`);
@@ -1098,14 +1102,44 @@ const lcReports  = new Map();
 
 // ── Fix helpers ───────────────────────────────────────────────────────────────
 
-function fixShortPaths(xmlContent, prefix) {
+// Longest k where the last k segments of `pre` equal the first k segments of `sp`.
+function segOverlap(pre, sp) {
+  for (let k = Math.min(pre.length, sp.length); k >= 1; k--) {
+    let ok = true;
+    for (let i = 0; i < k; i++) {
+      if (pre[pre.length - k + i] !== sp[i]) { ok = false; break; }
+    }
+    if (ok) return k;
+  }
+  return 0;
+}
+
+// Join a prefix to a short path, collapsing any overlapping segments so a
+// partial-absolute path that already contains the prefix tail isn't duplicated.
+function joinWithPrefix(prefix, p) {
+  const pre = prefix.split('/').filter(Boolean);
+  const sp  = p.split('/').filter(Boolean);
+  return '/' + [...pre, ...sp.slice(segOverlap(pre, sp))].join('/');
+}
+
+// localeRoot = the file's own locale root (e.g. .../abbvie-com/us/en)
+// siteRoot   = the shared site root  (e.g. .../abbvie-com)
+function fixShortPaths(xmlContent, localeRoot, siteRoot) {
   const SYSTEM_SKIP = /^\/(content|etc|apps|libs|bin|var|conf|home|crx|jcr|oak|system|mnt|tmp|is)\//i;
   const PATH_RE = /([="']|&quot;)(\/[a-zA-Z][a-zA-Z0-9-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9._-]*)+)/g;
+  const siteSegs = (siteRoot || '').split('/').filter(Boolean);
   const changes = [];
   const result = xmlContent.replace(PATH_RE, (match, delim, p) => {
-    if (SYSTEM_SKIP.test(p) || p.startsWith(prefix)) return match;
-    // Strip the .html/.htm page extension — AEM content paths are extensionless
-    const np = prefix + p.replace(/\.html?$/i, '');
+    if (SYSTEM_SKIP.test(p) || p.startsWith(localeRoot)) return match;
+    const cleaned = p.replace(/\.html?$/i, '');   // AEM content paths are extensionless
+    const cleanedSegs = cleaned.split('/').filter(Boolean);
+    // If the path begins with a tail of the SITE ROOT (e.g. /corporate/abbvie-com/...),
+    // it is site-root-relative and already carries its own locale → complete it against
+    // the site root. Otherwise it is relative to THIS file's locale.
+    const np = (siteRoot && segOverlap(siteSegs, cleanedSegs) > 0)
+      ? joinWithPrefix(siteRoot, cleaned)
+      : joinWithPrefix(localeRoot, cleaned);
+    if (np === p) return match;
     changes.push({ oldUrl: p, newUrl: np });
     return delim + np;
   });
@@ -1156,17 +1190,52 @@ function getFileLocaleRoot(entryName, siteRoot) {
   return siteRoot + '/' + localeSeg;
 }
 
-// Normalize a single DAM path: rewrite a known-incorrect DAM prefix to the correct root.
-// Returns the path unchanged if it doesn't begin with one of the old roots.
+// The site-qualifier segments (everything after /content/dam/) across the correct
+// root and the old roots — e.g. { corporate, abbvie-com2, abbvie-com }. These are
+// the segments that belong in the DAM root, so a stray copy left in the asset path
+// (e.g. /content/dam/abbvie-com2/corporate/pdfs/...) should be collapsed.
+function damQualifiers(correctRoot, oldRoots) {
+  const set = new Set();
+  for (const r of [correctRoot, ...oldRoots]) {
+    const segs = r.split('/').filter(Boolean);
+    let i = 0;
+    while (i < segs.length && (segs[i] === 'content' || segs[i] === 'dam')) i++;
+    for (; i < segs.length; i++) set.add(segs[i]);
+  }
+  return set;
+}
+
+// Normalize a single DAM path:
+//  1. repair a dotted qualifier segment (corporate.abbvie-com2 → corporate/abbvie-com2),
+//  2. rewrite a known-incorrect DAM prefix to the correct root,
+//  3. drop any stray site-qualifier segments left at the head of the asset path.
+// Returns the path unchanged if none of these apply.
+//   /content/dam/abbvie-com2/pdfs/x.pdf            → /content/dam/corporate/abbvie-com2/pdfs/x.pdf
+//   /content/dam/abbvie-com2/corporate/pdfs/x.pdf  → /content/dam/corporate/abbvie-com2/pdfs/x.pdf   (stray "corporate" collapsed)
+//   /content/dam/corporate.abbvie-com2/pdfs/x.pdf  → /content/dam/corporate/abbvie-com2/pdfs/x.pdf   (dotted segment repaired)
 function normalizeDamPrefix(p, correctRoot, oldRoots) {
   if (!correctRoot || !oldRoots?.length) return p;
-  for (const oldRoot of oldRoots) {
-    if (correctRoot.startsWith(oldRoot + '/')) continue;       // would re-match its own output
-    if (p === oldRoot || p.startsWith(oldRoot + '/')) {
-      return correctRoot + p.slice(oldRoot.length);
+  const quals = damQualifiers(correctRoot, oldRoots);
+
+  // 1. Repair a dotted qualifier segment right after /content/dam/. Only split when
+  //    every dot-part is a known qualifier, so real filenames (jameson-tile.webp) are safe.
+  const work = p.replace(/^(\/content\/dam\/)([^/]+)/, (m, base, seg) => {
+    const parts = seg.split('.');
+    return (parts.length >= 2 && parts.every(s => quals.has(s))) ? base + parts.join('/') : m;
+  });
+
+  // 2. Match against an old root (or the correct root itself, for repaired/stray cases).
+  //    Longest root first so the most specific prefix wins.
+  const roots = [...oldRoots, correctRoot].sort((a, b) => b.length - a.length);
+  for (const root of roots) {
+    if (root !== correctRoot && correctRoot.startsWith(root + '/')) continue;  // would re-match its own output
+    if (work === root || work.startsWith(root + '/')) {
+      const restSegs = work.slice(root.length).split('/').filter(Boolean);
+      while (restSegs.length && quals.has(restSegs[0])) restSegs.shift();       // collapse stray qualifiers
+      return restSegs.length ? `${correctRoot}/${restSegs.join('/')}` : correctRoot;
     }
   }
-  return p;
+  return work;   // dot-repair may have changed it even if no root matched
 }
 
 // Strip absolute base-site URL, strip .html, prepend file's locale root.
@@ -1245,21 +1314,17 @@ function fixScene7WithCsv(xmlContent, lookupMap) {
   return { result, unmatched, changes, unmatchedList };
 }
 
-// Normalize incorrect DAM path prefixes to the correct one
+// Normalize incorrect DAM path prefixes to the correct one (delegates per-path to
+// normalizeDamPrefix so prefix-swap + stray-qualifier collapse stay consistent).
 function fixDamPaths(xmlContent, correctDamRoot, oldDamRoots) {
-  let result = xmlContent;
   const changes = [];
-  for (const oldRoot of oldDamRoots) {
-    // Skip an old root that is a prefix of the correct root (would re-match its own output)
-    if (correctDamRoot.startsWith(oldRoot + '/')) continue;
-    const escaped = oldRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // Capture the rest of the path (stops at a quote, space, angle bracket or entity '&')
-    const RE = new RegExp(`(["'=]|&quot;)${escaped}(/[^"'<>\\s&]*)`, 'gi');
-    result = result.replace(RE, (m, delim, rest) => {
-      changes.push({ oldUrl: oldRoot + rest, newUrl: correctDamRoot + rest });
-      return delim + correctDamRoot + rest;
-    });
-  }
+  const RE = /(["'=]|&quot;)(\/content\/dam\/[^"'<>\s&]*)/g;
+  const result = xmlContent.replace(RE, (m, delim, damPath) => {
+    const np = normalizeDamPrefix(damPath, correctDamRoot, oldDamRoots);
+    if (np === damPath) return m;
+    changes.push({ oldUrl: damPath, newUrl: np });
+    return delim + np;
+  });
   return { result, changes };
 }
 
@@ -1287,6 +1352,7 @@ async function buildFixedZip(originalBuffer, fixes) {
     if (segs.includes('META-INF')) return true;              // all package metadata
     if (SKIP_FILES.has(segs[segs.length - 1])) return true;  // redirects.xml / filter.xml
     if (segs.includes('redirects')) return true;             // any file inside a redirects node
+    if (segs.includes('config')) return true;                // site config node (universal-editor-config, etc.)
     return false;
   };
 
@@ -1327,7 +1393,7 @@ async function buildFixedZip(originalBuffer, fixes) {
         }
         // 4. Fix short paths last — SYSTEM_SKIP prevents re-processing /content/ paths
         if (fixes.shortPath && localeRoot) {
-          const r = fixShortPaths(after, localeRoot);
+          const r = fixShortPaths(after, localeRoot, fixes.siteRoot);
           after = r.result;
           for (const c of r.changes) changes.push({ file, type: 'short-path', ...c });
         }
@@ -1426,6 +1492,58 @@ app.post('/api/link-checker/detect-root', express.json({ limit: '1mb' }), (req, 
   }
 });
 
+// HEAD-check each rewritten URL against AEM to flag 404s. Mutates reportRows
+// (adds `headStatus`). cfg = { aemHost, username, password } or null to skip.
+async function headCheckReport(reportRows, cfg) {
+  if (!cfg || !cfg.aemHost) {
+    for (const r of reportRows) r.headStatus = r.newUrl ? 'not checked' : '';
+    return { checked: 0, notFound: 0, errors: 0 };
+  }
+  const base = cfg.aemHost.replace(/\/$/, '');
+
+  // Map a rewritten URL to an absolute, fetchable URL (+ whether AEM auth applies).
+  //  absolute (DM delivery)        → as-is, no auth
+  //  /content/dam/... (asset)      → authHost + path
+  //  /content/... (page)           → authHost + path + .html  (renders the page node)
+  const toTarget = u => {
+    if (!u) return null;
+    if (/^https?:\/\//i.test(u)) return { url: u, auth: false };
+    if (u.startsWith('/content/dam/')) return { url: base + encodeURI(u),          auth: true };
+    if (u.startsWith('/content/'))     return { url: base + encodeURI(u) + '.html', auth: true };
+    return null;
+  };
+
+  const cache = new Map();
+  const headOne = async (newUrl) => {
+    const t = toTarget(newUrl);
+    if (!t) { cache.set(newUrl, 'not checkable'); return; }
+    const opts = { timeout: 8000, maxRedirects: 0, httpsAgent, validateStatus: () => true };
+    if (t.auth) opts.auth = { username: cfg.username || '', password: cfg.password || '' };
+    try {
+      let resp = await axios.head(t.url, opts);
+      if (resp.status === 405) resp = await axios.get(t.url, { ...opts, headers: { Range: 'bytes=0-0' } }); // server rejects HEAD
+      cache.set(newUrl, String(resp.status));
+    } catch (err) {
+      cache.set(newUrl, `ERR ${(err.code || err.message || 'failed')}`.slice(0, 40));
+    }
+  };
+
+  const jobs = [...new Set(reportRows.map(r => r.newUrl).filter(Boolean))];
+  const CONC = 15;
+  let idx = 0;
+  await Promise.all(Array.from({ length: Math.min(CONC, jobs.length) }, async () => {
+    while (idx < jobs.length) { const j = jobs[idx++]; await headOne(j); }
+  }));
+
+  let notFound = 0, errors = 0;
+  for (const r of reportRows) {
+    r.headStatus = r.newUrl ? (cache.get(r.newUrl) || 'not checked') : '';
+    if (r.headStatus === '404') notFound++;
+    else if (r.headStatus.startsWith('ERR')) errors++;
+  }
+  return { checked: jobs.length, notFound, errors };
+}
+
 // ── Fix all issues and return patched ZIP ─────────────────────────────────────
 app.post('/api/link-checker/fix-issues', express.json({ limit: '2mb' }), async (req, res) => {
   const { sessionId, fixes } = req.body;
@@ -1442,6 +1560,14 @@ app.post('/api/link-checker/fix-issues', express.json({ limit: '2mb' }), async (
       fixes.scene7.lookupMap = buildScene7LookupMap(rows);
     }
 
+    // Resolve optional HEAD-validation config (env → AEM author host from site.config)
+    let validateCfg = null;
+    if (fixes.validate?.env) {
+      const env = loadSiteConfig().environments.find(e => e.name === fixes.validate.env);
+      if (!env) return res.status(400).json({ error: `Environment "${fixes.validate.env}" not found in site.config.json.` });
+      validateCfg = { aemHost: env.aemUrl, username: fixes.validate.username, password: fixes.validate.password };
+    }
+
     const { buf, fixedCount, unmatchedScene7, changes, unmatchedList } = await buildFixedZip(buffer, fixes);
     lcSessions.delete(sessionId);
 
@@ -1452,14 +1578,19 @@ app.post('/api/link-checker/fix-issues', express.json({ limit: '2mb' }), async (
     for (const u of unmatchedList) {
       reportRows.push({ file: u.file, type: 'scene7', status: 'unmatched (no CSV entry)', oldUrl: u.oldUrl, newUrl: '' });
     }
+
+    // Optional: HEAD-check each rewritten URL against AEM and record the status.
+    const headSummary = await headCheckReport(reportRows, validateCfg);
+
     const reportCsv = stringify(reportRows, {
       header: true,
       columns: [
-        { key: 'file',   header: 'file'    },
-        { key: 'type',   header: 'type'    },
-        { key: 'status', header: 'status'  },
-        { key: 'oldUrl', header: 'old_url' },
-        { key: 'newUrl', header: 'new_url' },
+        { key: 'file',       header: 'file'        },
+        { key: 'type',       header: 'type'        },
+        { key: 'status',     header: 'status'      },
+        { key: 'oldUrl',     header: 'old_url'     },
+        { key: 'newUrl',     header: 'new_url'     },
+        { key: 'headStatus', header: 'head_status' },
       ],
     });
     const reportId = randomUUID();
@@ -1471,6 +1602,9 @@ app.post('/api/link-checker/fix-issues', express.json({ limit: '2mb' }), async (
     res.setHeader('X-Fixed-Count',      String(fixedCount));
     res.setHeader('X-Unmatched-Scene7', String(unmatchedScene7));
     res.setHeader('X-Change-Count',     String(changes.length));
+    res.setHeader('X-Head-Checked',     String(headSummary.checked));
+    res.setHeader('X-Head-404',         String(headSummary.notFound));
+    res.setHeader('X-Head-Errors',      String(headSummary.errors));
     res.setHeader('X-Report-Id',        reportId);
     res.send(buf);
   } catch (err) {

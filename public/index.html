@@ -767,6 +767,39 @@
           </div>
         </div>
 
+        <!-- Validate (HEAD check) section -->
+        <div class="lc-fix-section" style="border-bottom:1px solid #f0f0f0">
+          <div class="lc-fix-section-hdr">
+            <div class="form-check mb-0">
+              <input class="form-check-input" type="checkbox" id="lcFix-check-validate" onchange="lcToggleValidate()" />
+              <label class="form-check-label fw-semibold" for="lcFix-check-validate">
+                Validate rewritten URLs (HEAD check)
+              </label>
+            </div>
+            <span class="text-muted small">Confirms each new URL exists in AEM — flags 404s in the report</span>
+          </div>
+          <div class="ms-4 row g-2" id="lcValidateFields" style="display:none">
+            <div class="col-md-4">
+              <label class="form-label small mb-1">AEM environment:</label>
+              <select class="form-select form-select-sm" id="lcFix-validate-env">
+                <option value="">— select —</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small mb-1">Username:</label>
+              <input type="text" class="form-control form-control-sm" id="lcFix-validate-user" autocomplete="off" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small mb-1">Password:</label>
+              <input type="password" class="form-control form-control-sm" id="lcFix-validate-pass" autocomplete="off" />
+            </div>
+            <div class="col-12 text-muted" style="font-size:0.75rem">
+              Pages are checked as <code>{path}.html</code>, DAM assets and absolute DM URLs directly.
+              Validation runs against the selected environment's author host and may take a while for large packages.
+            </div>
+          </div>
+        </div>
+
         <!-- Fix All button -->
         <div class="lc-fix-section">
           <div class="d-flex align-items-center gap-3 flex-wrap">
