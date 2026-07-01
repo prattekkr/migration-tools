@@ -30,8 +30,12 @@
     "eds": "hideFromNavigation"
   },
   {
+    "aem": "jcr:description",
+    "eds": "jcr:description"
+  },
+  {
     "aem": "jcr:title",
-    "eds": "cardTitle"
+    "eds": "jcr:title"
   },
   {
     "aem": "navTitle",
@@ -43,6 +47,10 @@
     "transform": "dam-path-to-eds"
   },
   {
+    "aem": "pageTitle",
+    "eds": "pageTitle"
+  },
+  {
     "aem": "readTime",
     "eds": "storyReadTime"
   },
@@ -51,7 +59,11 @@
     "eds": "readWatchTime"
   },
   {
+    "aem": "subtitle",
+    "eds": "pageSubtitle"
+  },
+  {
     "aem": "title",
-    "eds": "jcr:title"
+    "eds": "cardTitle"
   }
 ]
