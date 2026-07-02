@@ -665,8 +665,79 @@
     <!-- Results (hidden until checked) -->
     <div id="lcResults" style="display:none">
 
-      <!-- Summary stats -->
-      <div class="row g-3 mb-4" id="lcStatCards"></div>
+      <!-- ── Summary + primary action (always visible) ── -->
+      <div class="card mb-3" style="border-left:4px solid #198754">
+        <div class="card-body">
+          <div class="text-muted small mb-2" id="lcScanLine">—</div>
+          <div id="lcIssueChips" class="d-flex flex-wrap gap-2 mb-3"></div>
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <label class="fw-semibold small mb-0" for="lcEnv">Target environment:</label>
+            <select class="form-select form-select-sm" id="lcEnv" style="max-width:220px">
+              <option value="">— select —</option>
+            </select>
+            <button class="btn btn-primary" id="lcFixAllBtn" onclick="lcFixIssues()">
+              <i class="bi bi-magic me-2"></i>Fix All &amp; Download ZIP
+            </button>
+            <div id="lcFixStatus" class="small text-muted"></div>
+          </div>
+          <div class="text-muted mt-2" style="font-size:0.75rem">
+            All detected fixes are pre-selected — just pick the environment and click <strong>Fix All</strong>.
+            The environment is used for Scene7 &amp; PDF → DM Open API lookups. Expand <em>Details</em> to change
+            what runs, view the PDF list, or explore &amp; export every link.
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Details: fix options, breakdown, PDF list, link table (collapsed) ── -->
+      <div class="card mb-3">
+        <div class="card-header d-flex align-items-center gap-2" style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#lcDetailsBody" aria-expanded="false">
+          <i class="bi bi-sliders text-secondary"></i>
+          <strong>Details &amp; advanced options</strong>
+          <span class="text-muted small ms-1">— fix toggles, full breakdown, PDF list, all links</span>
+          <i class="bi bi-chevron-down ms-auto"></i>
+        </div>
+        <div id="lcDetailsBody" class="collapse">
+          <div class="card-body">
+
+          <!-- Summary stats -->
+          <div class="row g-3 mb-4" id="lcStatCards"></div>
+
+      <!-- PDF Links (shown only when .pdf references exist) -->
+      <div class="card mb-3" id="lcPdfCard" style="display:none">
+        <div class="card-header d-flex align-items-center gap-2" style="background:#fff5f5;border-left:4px solid #dc3545">
+          <i class="bi bi-file-earmark-pdf text-danger"></i>
+          <strong>PDF Links</strong>
+          <span class="badge bg-danger ms-1" id="lcPdfCount">0</span>
+          <span class="text-muted small ms-1">— review PDF references, then convert <code>/content/dam</code> PDFs to DM Open API URLs</span>
+        </div>
+        <div class="card-body">
+          <input type="text" class="form-control form-control-sm mb-2" id="lcPdfFilter"
+            placeholder="Filter PDF list..." oninput="lcFilterPdfList()" style="max-width:320px" />
+          <div class="lc-table-wrap" style="max-height:340px;overflow:auto">
+            <table class="table table-sm table-hover mb-0">
+              <thead class="table-light sticky-top">
+                <tr>
+                  <th>PDF reference</th>
+                  <th style="width:70px" class="text-center">Refs</th>
+                  <th style="width:120px">Type</th>
+                </tr>
+              </thead>
+              <tbody id="lcPdfList"></tbody>
+            </table>
+          </div>
+          <div class="d-flex align-items-center gap-2 mt-3 flex-wrap">
+            <button class="btn btn-outline-primary btn-sm" id="lcPdfViewBtn" onclick="lcViewPdfs()">
+              <i class="bi bi-eye me-1"></i>Resolve DM URLs (make PDFs viewable)
+            </button>
+            <div id="lcPdfStatus" class="small"></div>
+          </div>
+          <div class="text-muted mt-1" style="font-size:0.75rem">
+            Select the <strong>Target environment</strong> at the top, then click <em>Resolve DM URLs</em> to turn each PDF
+            into a clickable link you can open/preview. The actual conversion into the package is done together with every
+            other correction via <strong>Fix All &amp; Download ZIP</strong> at the top.
+          </div>
+        </div>
+      </div>
 
       <!-- Fix Short Paths (shown only when short-path links exist) -->
       <div class="card mb-3" id="lcFixCard" style="display:none">
@@ -723,14 +794,9 @@
               </label>
             </div>
           </div>
-          <div class="ms-4">
-            <label class="form-label small mb-1">Asset map environment (from Image/Asset tool):</label>
-            <select class="form-select form-select-sm" id="lcFix-scene7-env" style="max-width:320px">
-              <option value="">— no CSV available —</option>
-            </select>
-            <div class="text-muted" style="font-size:0.75rem;margin-top:3px">
-              Matches each Scene7 asset name against the CSV and replaces with the DM Open API URL. Unmatched assets are left unchanged.
-            </div>
+          <div class="ms-4 text-muted" style="font-size:0.78rem">
+            Matches each Scene7 asset against the selected <strong>Target environment</strong>'s asset map and replaces
+            it with the DM Open API URL. Unmatched assets are left unchanged.
           </div>
         </div>
 
@@ -780,6 +846,24 @@
           </div>
         </div>
 
+        <!-- PDF → DM Open API section -->
+        <div class="lc-fix-section" style="border-bottom:1px solid #f0f0f0">
+          <div class="lc-fix-section-hdr">
+            <div class="form-check mb-0">
+              <input class="form-check-input" type="checkbox" id="lcFix-check-pdf" />
+              <label class="form-check-label fw-semibold" for="lcFix-check-pdf">
+                Convert PDF links → DM Open API URLs
+              </label>
+            </div>
+            <span class="text-muted small">Also fixes existing DM PDF URLs missing <code>/original/as/</code></span>
+          </div>
+          <div class="ms-4 text-muted" style="font-size:0.78rem">
+            Converts every <code>/content/dam/…​.pdf</code> (bare or embedded in an <code>abbvie.com</code> URL) to its
+            DM Open API URL using the selected <strong>Target environment</strong>, and fixes existing DM PDF URLs
+            missing <code>/original/as/</code>.
+          </div>
+        </div>
+
         <!-- Validate (HEAD check) section -->
         <div class="lc-fix-section" style="border-bottom:1px solid #f0f0f0">
           <div class="lc-fix-section-hdr">
@@ -792,37 +876,22 @@
             <span class="text-muted small">Confirms each new URL exists in AEM — flags 404s in the report</span>
           </div>
           <div class="ms-4 row g-2" id="lcValidateFields" style="display:none">
-            <div class="col-md-4">
-              <label class="form-label small mb-1">AEM environment:</label>
-              <select class="form-select form-select-sm" id="lcFix-validate-env">
-                <option value="">— select —</option>
-              </select>
-            </div>
-            <div class="col-md-4">
+            <div class="col-md-6">
               <label class="form-label small mb-1">Username:</label>
               <input type="text" class="form-control form-control-sm" id="lcFix-validate-user" autocomplete="off" />
             </div>
-            <div class="col-md-4">
+            <div class="col-md-6">
               <label class="form-label small mb-1">Password:</label>
               <input type="password" class="form-control form-control-sm" id="lcFix-validate-pass" autocomplete="off" />
             </div>
             <div class="col-12 text-muted" style="font-size:0.75rem">
-              Pages are checked as <code>{path}.html</code>, DAM assets and absolute DM URLs directly.
-              Validation runs against the selected environment's author host and may take a while for large packages.
+              Uses the selected <strong>Target environment</strong>'s author host. Pages are checked as <code>{path}.html</code>,
+              DAM assets and absolute DM URLs directly. May take a while for large packages.
             </div>
           </div>
         </div>
 
-        <!-- Fix All button -->
-        <div class="lc-fix-section">
-          <div class="d-flex align-items-center gap-3 flex-wrap">
-            <button class="btn btn-primary" id="lcFixAllBtn" onclick="lcFixIssues()">
-              <i class="bi bi-download me-2"></i>Fix All &amp; Download ZIP
-            </button>
-            <div id="lcFixStatus" class="small text-muted"></div>
-          </div>
-        </div>
-      </div>
+      </div><!-- /#lcFixCard -->
 
       <!-- Controls bar -->
       <div class="card mb-3">
@@ -835,6 +904,9 @@
             <button class="btn btn-sm btn-outline-secondary lc-type-btn" data-type="external" onclick="lcSetTypeFilter('external')">External</button>
             <button class="btn btn-sm btn-outline-secondary lc-type-btn" data-type="scene7" onclick="lcSetTypeFilter('scene7')">Scene7</button>
             <button class="btn btn-sm btn-outline-secondary lc-type-btn" data-type="dm-openapi" onclick="lcSetTypeFilter('dm-openapi')">DM Open API</button>
+            <button class="btn btn-sm btn-outline-danger lc-type-btn" data-type="pdf" onclick="lcSetTypeFilter('pdf')">
+              <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+            </button>
             <button class="btn btn-sm btn-outline-secondary lc-type-btn" data-type="aem-cloud" onclick="lcSetTypeFilter('aem-cloud')">AEM Cloud</button>
             <button class="btn btn-sm btn-outline-danger lc-type-btn" data-type="abbvie-abs" onclick="lcSetTypeFilter('abbvie-abs')">
               <i class="bi bi-exclamation-triangle me-1"></i>AbbVie (Abs)
@@ -877,6 +949,10 @@
         </table>
         <div id="lcNoResults" class="text-center text-muted py-5" style="display:none">No files match the current filter.</div>
       </div>
+
+          </div><!-- /card-body -->
+        </div><!-- /#lcDetailsBody -->
+      </div><!-- /Details card -->
 
     </div><!-- /#lcResults -->
   </div>

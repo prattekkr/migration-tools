@@ -3,12 +3,12 @@
     "host": "https://34.225.5.238",
     "username": "migration1",
     "password": "migration",
-    "rootPath": "/content/abbvie-com2/us/en/"
+    "rootPath": "/content/abbvie-com2/us/en/who-we-are/our-stories"
   },
   "target": {
     "host": "https://author-p157365-e1665873.adobeaemcloud.com",
     "username": "migration",
     "password": "migration",
-    "rootPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/us/en/"
+    "rootPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/language-masters/en/who-we-are/our-stories"
   }
 }

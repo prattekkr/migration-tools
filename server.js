@@ -522,6 +522,24 @@ function loadSiteConfig() {
   return { environments: [] };
 }
 
+// ── DM Open API URL builder ────────────────────────────────────────────────────
+// Image assets are delivered via the optimized path (…/as/name.ext); everything
+// else (PDF and other documents) must use the ORIGINAL binary path (…/original/as/name.ext).
+const DM_IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'tif', 'tiff', 'bmp', 'avif', 'ico', 'heic', 'heif']);
+function dmDeliverySegment(filename) {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  return DM_IMAGE_EXT.has(ext) ? 'as' : 'original/as';
+}
+function buildDmOpenApiUrl(host, uuid, filename) {
+  return `https://${host}/adobe/assets/urn:aaid:aem:${uuid}/${dmDeliverySegment(filename)}/${filename}`;
+}
+// Ensure a PDF (non-image) DM URL uses the /original/as/ path — corrects older CSVs
+// that were generated with the plain /as/ path, without needing a rebuild.
+function ensureOriginalDelivery(url) {
+  if (!/^https?:\/\//i.test(url) || url.includes('/original/as/')) return url;
+  return url.replace(/(\/adobe\/assets\/[^/]+)\/as\//, '$1/original/as/');
+}
+
 // ── Site config ───────────────────────────────────────────────────────────────
 app.get('/api/image/site-config', (req, res) => {
   res.json(loadSiteConfig());
@@ -591,7 +609,7 @@ app.post('/api/image/build-csv', async (req, res) => {
       ).trim().toLowerCase();
       const filename   = path.posix.basename(jcrPath);
       const openApiUrl = uuid && damStatus === 'approved'
-        ? `https://${cleanHost}/adobe/assets/urn:aaid:aem:${uuid}/as/${filename}`
+        ? buildDmOpenApiUrl(cleanHost, uuid, filename)
         : jcrPath;
       return { path: jcrPath, uuid, scene7Name, scene7File, damStatus, openApiUrl };
     });
@@ -704,7 +722,7 @@ app.post('/api/image/update-zip', (req, res, next) => {
       if (processingMode === 'per-env' || !targetDmHost) return row.openApiUrl;
       if (!row.uuid || row.damStatus !== 'approved') return row.openApiUrl;
       const filename = path.posix.basename(row.path);
-      return `https://${targetDmHost}/adobe/assets/urn:aaid:aem:${row.uuid}/as/${filename}`;
+      return buildDmOpenApiUrl(targetDmHost, row.uuid, filename);
     };
 
     const swapDomain = url => url;
@@ -1403,6 +1421,99 @@ function fixDamPaths(xmlContent, correctDamRoot, oldDamRoots) {
   return { result, changes };
 }
 
+// Package-control / config content that must never be rewritten — copy through as-is.
+// The entire META-INF tree, a literal redirects.xml / filter.xml file anywhere, a
+// `redirects` JCR node, and the site `config` node (universal-editor-config, etc.).
+function lcIsSkipped(name) {
+  const segs = name.split('/');
+  if (segs.includes('META-INF')) return true;
+  if (segs[segs.length - 1] === 'redirects.xml' || segs[segs.length - 1] === 'filter.xml') return true;
+  if (segs.includes('redirects')) return true;
+  if (segs.includes('config')) return true;
+  return false;
+}
+
+// PDF fixes in one pass:
+//  Pass 1 (needs pathMap) — convert DAM PDF refs (bare or embedded in an absolute URL)
+//          to their DM Open API URL; the DAM prefix is normalized first so un-normalized
+//          paths still match, and the result uses /original/as/.
+//  Pass 2 (always) — correct EXISTING DM delivery PDF URLs that were written with /as/
+//          instead of /original/as/.
+// Only actual replacements are recorded in `changes`; unmatched refs are just counted.
+function fixPdfDamRefs(xmlContent, pathMap, damNorm) {
+  const changes = [];
+  let converted = 0, unmatched = 0, originalFixed = 0;
+  let result = xmlContent;
+
+  if (pathMap) {
+    const RE = /(["'=]|&quot;)(?:https?:\/\/[^"'<>\s&]*?)?(\/content\/dam\/[^"'<>\s&]*?\.pdf)/gi;
+    result = result.replace(RE, (m, delim, pdfPath) => {
+      const oldFull = m.slice(delim.length);   // full original ref (may include the domain)
+      const raw  = pdfPath.split('?')[0].split('#')[0];
+      const norm = damNorm ? normalizeDamPrefix(raw, damNorm.correctRoot, damNorm.oldRoots) : raw;
+      const dm   = pathMap.get(raw) || pathMap.get(norm);
+      if (dm && /^https?:\/\//i.test(dm)) {
+        converted++;
+        const dmUrl = ensureOriginalDelivery(dm);   // PDFs deliver via /original/as/
+        changes.push({ oldUrl: oldFull, newUrl: dmUrl, status: 'converted' });
+        return delim + dmUrl;
+      }
+      unmatched++;
+      return m;
+    });
+  }
+
+  // Pass 2 — existing DM delivery PDF URLs missing /original/as/
+  const RE2 = /(["'=]|&quot;)(https?:\/\/[^"'<>\s&]*\/adobe\/assets\/[^"'<>\s&]+?\/as\/[^"'<>\s&]+?\.pdf)/gi;
+  result = result.replace(RE2, (m, delim, url) => {
+    const fixed = ensureOriginalDelivery(url);
+    if (fixed !== url) {
+      originalFixed++;
+      changes.push({ oldUrl: url, newUrl: fixed, status: 'original-path fixed' });
+      return delim + fixed;
+    }
+    return m;
+  });
+
+  return { result, changes, converted, unmatched, originalFixed };
+}
+
+// Build a ZIP with all PDF DAM links converted to DM Open API URLs (handles nested ZIPs).
+async function convertPdfsInZip(originalBuffer, pathMap, damNorm) {
+  const outerAdm   = new AdmZip(originalBuffer);
+  const innerEntry = outerAdm.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
+  const changes = [];
+  let converted = 0, unmatched = 0;
+
+  async function patch(admZip) {
+    const jsz = new JSZip();
+    for (const e of admZip.getEntries()) {
+      if (e.isDirectory) continue;
+      if (e.entryName.endsWith('.xml') && !lcIsSkipped(e.entryName)) {
+        const before = e.getData().toString('utf8');
+        const r = fixPdfDamRefs(before, pathMap, damNorm);
+        converted += r.converted; unmatched += r.unmatched;
+        for (const c of r.changes) changes.push({ file: e.entryName.replace(/^jcr_root/, ''), ...c });
+        jsz.file(e.entryName, r.result);
+      } else {
+        jsz.file(e.entryName, e.getData());
+      }
+    }
+    return jsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  }
+
+  if (innerEntry) {
+    const patchedInner = await patch(new AdmZip(innerEntry.getData()));
+    const outerJsz = new JSZip();
+    for (const e of outerAdm.getEntries()) {
+      if (e.isDirectory) continue;
+      outerJsz.file(e.entryName, e.entryName === innerEntry.entryName ? patchedInner : e.getData());
+    }
+    return { buf: await outerJsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), changes, converted, unmatched };
+  }
+  return { buf: await patch(outerAdm), changes, converted, unmatched };
+}
+
 // Build a fixed ZIP applying all requested fixes per-file
 // fixes = { siteRoot, shortPath?, scene7?: { lookupMap }, absBaseUrl?: { baseDomain }, damPaths?: { correctRoot, oldRoots } }
 async function buildFixedZip(originalBuffer, fixes) {
@@ -1416,26 +1527,11 @@ async function buildFixedZip(originalBuffer, fixes) {
   // Strip the leading jcr_root/ from a ZIP entry name for cleaner report paths
   const reportPath = name => name.replace(/^jcr_root/, '');
 
-  // Package-control / config content that must never be rewritten — copy through as-is.
-  // Covers: the entire META-INF package-metadata tree (filter.xml, config.xml,
-  // properties.xml, definition/.content.xml, …), a literal redirects.xml /
-  // filter.xml file anywhere, and a `redirects` JCR node (whose config lives in
-  // .../redirects/.content.xml).
-  const SKIP_FILES = new Set(['redirects.xml', 'filter.xml']);
-  const isSkipped = name => {
-    const segs = name.split('/');
-    if (segs.includes('META-INF')) return true;              // all package metadata
-    if (SKIP_FILES.has(segs[segs.length - 1])) return true;  // redirects.xml / filter.xml
-    if (segs.includes('redirects')) return true;             // any file inside a redirects node
-    if (segs.includes('config')) return true;                // site config node (universal-editor-config, etc.)
-    return false;
-  };
-
   async function patchEntries(admZip) {
     const jsz = new JSZip();
     for (const e of admZip.getEntries()) {
       if (e.isDirectory) continue;
-      if (e.entryName.endsWith('.xml') && !isSkipped(e.entryName)) {
+      if (e.entryName.endsWith('.xml') && !lcIsSkipped(e.entryName)) {
         const before    = e.getData().toString('utf8');
         let after       = before;
         const file       = reportPath(e.entryName);
@@ -1444,6 +1540,14 @@ async function buildFixedZip(originalBuffer, fixes) {
         // DAM config (shared by abbvie-abs in-place normalization and the standalone DAM fix)
         const damCfg = (fixes.damPaths?.correctRoot && fixes.damPaths?.oldRoots?.length)
           ? fixes.damPaths : null;
+
+        // 0. PDF DAM links → DM Open API URLs (first, so the absolute DM URLs are immune
+        //    to the later fixers), plus correct existing DM PDF URLs missing /original/as/.
+        if (fixes.pdfToDm) {
+          const r = fixPdfDamRefs(after, fixes.pdfToDm.pathMap, fixes.pdfToDm.damNorm);
+          after = r.result;
+          for (const c of r.changes) changes.push({ file, type: 'pdf-dm', ...c });
+        }
 
         // 1. Fix absolute base-site URLs first → output /content/..., immune to short-path fixer.
         //    Embedded /content/dam/... refs get their DAM prefix normalized in the same step.
@@ -1635,6 +1739,17 @@ app.post('/api/link-checker/fix-issues', express.json({ limit: '2mb' }), async (
       fixes.scene7.lookupMap = buildScene7LookupMap(rows);
     }
 
+    // Resolve optional PDF → DM conversion config (env → asset-map CSV + DAM normalization)
+    if (fixes.pdfToDm?.env) {
+      const pmap = loadDamPathMap(fixes.pdfToDm.env);
+      if (!pmap) return res.status(400).json({ error: `PDF conversion needs an asset-map CSV — none found for environment "${fixes.pdfToDm.env}". Build it in the Image/Asset tool first.` });
+      const se = loadSiteConfig().environments.find(e => e.name === fixes.pdfToDm.env);
+      fixes.pdfToDm = {
+        pathMap: pmap,
+        damNorm: { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] },
+      };
+    }
+
     // Resolve optional HEAD-validation config (env → AEM author host from site.config)
     let validateCfg = null;
     if (fixes.validate?.env) {
@@ -1648,7 +1763,7 @@ app.post('/api/link-checker/fix-issues', express.json({ limit: '2mb' }), async (
 
     // Build a change-report CSV: every rewrite plus any unmatched Scene7 URL
     const reportRows = changes.map(c => ({
-      file: c.file, type: c.type, status: 'changed', oldUrl: c.oldUrl, newUrl: c.newUrl,
+      file: c.file, type: c.type, status: c.status || 'changed', oldUrl: c.oldUrl, newUrl: c.newUrl,
     }));
     for (const u of unmatchedList) {
       reportRows.push({ file: u.file, type: 'scene7', status: 'unmatched (no CSV entry)', oldUrl: u.oldUrl, newUrl: '' });
@@ -1694,6 +1809,69 @@ app.get('/api/link-checker/fix-report/:id', (req, res) => {
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="fix-change-report.csv"');
   res.send(csv);
+});
+
+// ── Resolve PDF DAM paths → DM Open API URLs (for the viewable PDF list) ──────
+app.post('/api/link-checker/pdf-dm-urls', express.json({ limit: '2mb' }), (req, res) => {
+  const { env, paths } = req.body;
+  const pathMap = loadDamPathMap(env);
+  if (!pathMap) return res.status(400).json({ error: `No asset-map CSV found for environment "${env || '(none)'}". Build it in the Image/Asset tool first.` });
+  const se = loadSiteConfig().environments.find(e => e.name === env);
+  const damNorm = { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
+  const resolve = u => {
+    const s = String(u);
+    // Already a DM delivery URL (…/adobe/assets/…/as/…​.pdf)? Just correct /as/ → /original/as/.
+    if (/\/adobe\/assets\//i.test(s) && /^https?:\/\//i.test(s)) return ensureOriginalDelivery(s);
+    const raw = s.replace(/^https?:\/\/[^/]+/, '').split('?')[0].split('#')[0];  // strip any host
+    if (!raw.startsWith('/content/dam/')) return '';
+    const dm = pathMap.get(raw) || pathMap.get(normalizeDamPrefix(raw, damNorm.correctRoot, damNorm.oldRoots));
+    return (dm && /^https?:\/\//i.test(dm)) ? ensureOriginalDelivery(dm) : '';
+  };
+  res.json({ resolved: (paths || []).map(resolve) });
+});
+
+// ── Convert PDF DAM links → DM Open API URLs and return patched ZIP ───────────
+app.post('/api/link-checker/convert-pdfs', express.json({ limit: '1mb' }), async (req, res) => {
+  const { sessionId, env } = req.body;
+  const buffer = lcSessions.get(sessionId);
+  if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
+
+  const pathMap = loadDamPathMap(env);
+  if (!pathMap) return res.status(400).json({ error: `No asset-map CSV found for environment "${env || '(none)'}". Build it in the Image/Asset tool first.` });
+
+  // Normalize each PDF's DAM prefix to the correct root before the CSV lookup, so
+  // un-normalized paths (/content/dam/abbvie-com2/…, dotted, stray-corporate) still match.
+  const siteEnv = loadSiteConfig().environments.find(e => e.name === env);
+  const damNorm = {
+    correctRoot: siteEnv?.damRoot || '/content/dam/corporate/abbvie-com2',
+    oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'],
+  };
+
+  try {
+    const { buf, changes, converted, unmatched } = await convertPdfsInZip(buffer, pathMap, damNorm);
+    // Keep the session so the user can re-run with a different environment.
+    const reportCsv = stringify(changes, {
+      header: true,
+      columns: [
+        { key: 'file',   header: 'file'    },
+        { key: 'oldUrl', header: 'old_pdf' },
+        { key: 'newUrl', header: 'dm_url'  },
+        { key: 'status', header: 'status'  },
+      ],
+    });
+    const reportId = randomUUID();
+    lcReports.set(reportId, reportCsv);
+    setTimeout(() => lcReports.delete(reportId), 15 * 60 * 1000).unref?.();
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="pdfs-converted.zip"');
+    res.setHeader('X-Pdf-Converted', String(converted));
+    res.setHeader('X-Pdf-Unmatched', String(unmatched));
+    res.setHeader('X-Report-Id',     reportId);
+    res.send(buf);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Export link report as CSV ─────────────────────────────────────────────────
