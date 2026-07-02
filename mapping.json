@@ -23,7 +23,7 @@
   {
     "aem": "fileReference",
     "eds": "cardImage",
-    "transform": "dam-path-to-eds"
+    "transform": "dam-to-dm-openapi"
   },
   {
     "aem": "hideInNav",
@@ -44,7 +44,7 @@
   {
     "aem": "ogimage",
     "eds": "image",
-    "transform": "dam-path-to-eds"
+    "transform": "dam-to-dm-openapi"
   },
   {
     "aem": "pageTitle",
@@ -65,5 +65,10 @@
   {
     "aem": "title",
     "eds": "cardTitle"
+  },
+  {
+    "eds": "pageVariant",
+    "value": "storyPage",
+    "valueType": "String"
   }
 ]

@@ -193,11 +193,13 @@
           <table class="table table-sm table-hover align-middle" id="mappingTable">
             <thead class="table-dark">
               <tr>
-                <th style="width:25%">AEM Property</th>
-                <th style="width:25%">Sample Value</th>
-                <th style="width:25%">EDS Property Name</th>
-                <th style="width:20%">Transform</th>
-                <th style="width:5%"></th>
+                <th style="width:16%">AEM Property</th>
+                <th style="width:15%">Sample Value</th>
+                <th style="width:19%">EDS Property Name</th>
+                <th style="width:17%">Transform</th>
+                <th style="width:17%">Value <span class="fw-normal text-white-50">(custom)</span></th>
+                <th style="width:12%">Type</th>
+                <th style="width:4%"></th>
               </tr>
             </thead>
             <tbody id="mappingBody"></tbody>
@@ -221,8 +223,19 @@
           <button class="btn btn-sm btn-outline-secondary" onclick="selectAll()">Select All</button>
           <button class="btn btn-sm btn-outline-secondary" onclick="deselectAll()">Deselect All</button>
           <input type="text" class="form-control form-control-sm" id="pageFilter"
-            placeholder="Filter pages..." oninput="filterPagesTable()" style="max-width:280px" />
+            placeholder="Find page (e.g. who-we-are)" title="Whole-segment match. Toggle 'Include children' to also match descendant pages."
+            oninput="filterPagesTable()" style="max-width:260px" />
+          <div class="form-check form-check-inline mb-0" title="Off = only the exact page. On = the page and all its child pages.">
+            <input class="form-check-input" type="checkbox" id="pageFilterSubtree" onchange="filterPagesTable()" />
+            <label class="form-check-label small text-muted" for="pageFilterSubtree">Include children</label>
+          </div>
           <span id="selectionCount" class="text-muted small">0 pages selected</span>
+          <div class="d-flex align-items-center gap-2" title="Used only by the 'DAM → DM Open API URL' transform">
+            <label class="text-muted small mb-0" for="metaAssetEnv">Asset-map env:</label>
+            <select class="form-select form-select-sm" id="metaAssetEnv" style="max-width:170px">
+              <option value="">— none —</option>
+            </select>
+          </div>
           <div class="ms-auto d-flex gap-2">
             <button class="btn btn-outline-info px-3" onclick="verifyTargets()" id="verifyBtn">
               <i class="bi bi-shield-check me-1"></i>Verify Targets

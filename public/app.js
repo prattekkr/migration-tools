@@ -152,7 +152,7 @@ async function loadDiscoveredPages() {
 async function buildMappingTable() {
   const savedList = await fetchJSON('/api/meta/mapping');
   const savedMap  = {};
-  savedList.forEach(m => { savedMap[m.aem] = m; });
+  savedList.forEach(m => { if (m.aem) savedMap[m.aem] = m; });
 
   const samples = {};
   allProps.forEach(p => {
@@ -164,6 +164,7 @@ async function buildMappingTable() {
   const tbody = document.getElementById('mappingBody');
   tbody.innerHTML = '';
 
+  // Discovered AEM properties → source-mapped rows
   allProps.forEach(prop => {
     const sample     = samples[prop] || '';
     const saved      = savedMap[prop];
@@ -172,13 +173,19 @@ async function buildMappingTable() {
     tbody.insertAdjacentHTML('beforeend', mappingRow(prop, sample, edsVal, transformVal));
   });
 
+  // Saved constant (custom) properties → constant rows (no AEM source)
+  savedList.filter(m => !m.aem && m.eds).forEach(m => {
+    tbody.insertAdjacentHTML('beforeend', mappingRow('', '', m.eds, '', m.value || '', m.valueType || 'String'));
+  });
+
   document.getElementById('mappingSection').style.display = 'block';
 }
 
 const TRANSFORMS = [
-  { value: '',                label: 'None' },
-  { value: 'aem-tag-to-eds', label: 'AEM Tag → EDS  (ns:path → corporate:ns/path)' },
-  { value: 'dam-path-to-eds', label: 'DAM Path → EDS  (inserts /corporate/)' }
+  { value: '',                 label: 'None' },
+  { value: 'aem-tag-to-eds',   label: 'AEM Tag → EDS  (ns:path → corporate:ns/path)' },
+  { value: 'dam-path-to-eds',  label: 'DAM Path → EDS  (inserts /corporate/)' },
+  { value: 'dam-to-dm-openapi', label: 'DAM Path → DM Open API URL  (CSV lookup)' }
 ];
 
 function transformOptions(selected = '') {
@@ -187,19 +194,51 @@ function transformOptions(selected = '') {
   ).join('');
 }
 
-function mappingRow(aemProp, sample, edsVal = '', transformVal = '') {
-  const sid = `eds_${aemProp.replace(/[^a-zA-Z0-9]/g, '_')}`;
+// AEM/JCR standard value types for custom (constant) EDS properties
+const VALUE_TYPES = [
+  { value: 'String',   label: 'String' },
+  { value: 'String[]', label: 'String (multi-value)' },
+  { value: 'Boolean',  label: 'Boolean' },
+  { value: 'Date',     label: 'Date' },
+  { value: 'Long',     label: 'Long' },
+  { value: 'Double',   label: 'Double' },
+];
+
+function valueTypeOptions(selected = 'String') {
+  return VALUE_TYPES.map(t =>
+    `<option value="${t.value}" ${t.value === selected ? 'selected' : ''}>${escHtml(t.label)}</option>`
+  ).join('');
+}
+
+// A row is a "constant" (custom EDS property with a literal value) when it has no AEM source.
+// Constant rows: enter EDS name + Value + Type. Source rows: map AEM prop + Transform.
+function mappingRow(aemProp, sample, edsVal = '', transformVal = '', value = '', valueType = 'String') {
+  const custom = !aemProp;
+  const sid = `eds_${(aemProp || 'custom_' + Math.random().toString(36).slice(2, 8)).replace(/[^a-zA-Z0-9]/g, '_')}`;
+  const aemCell = custom
+    ? `<input type="text" class="form-control form-control-sm aem-input" placeholder="(constant)" disabled />`
+    : `<code class="text-primary">${escHtml(aemProp)}</code>`;
   return `
-    <tr data-aem="${escHtml(aemProp)}">
-      <td><code class="text-primary">${escHtml(aemProp)}</code></td>
+    <tr data-aem="${escHtml(aemProp)}" data-custom="${custom ? '1' : '0'}">
+      <td>${custom ? '<span class="badge bg-secondary">constant</span>' : aemCell}</td>
       <td class="text-muted small text-truncate" style="max-width:150px" title="${escHtml(sample)}">${escHtml(sample)}</td>
       <td>
         <input type="text" class="form-control form-control-sm eds-input" id="${sid}"
           placeholder="eds property name" value="${escHtml(edsVal)}" />
       </td>
       <td>
-        <select class="form-select form-select-sm transform-input">
+        <select class="form-select form-select-sm transform-input" ${custom ? 'disabled title="constants are not transformed"' : ''}>
           ${transformOptions(transformVal)}
+        </select>
+      </td>
+      <td>
+        <input type="text" class="form-control form-control-sm value-input"
+          placeholder="${custom ? 'literal value (comma-separated for multi)' : '— from source —'}"
+          value="${escHtml(value)}" ${custom ? '' : 'disabled'} />
+      </td>
+      <td>
+        <select class="form-select form-select-sm type-input" ${custom ? '' : 'disabled'}>
+          ${valueTypeOptions(valueType)}
         </select>
       </td>
       <td>
@@ -211,7 +250,7 @@ function mappingRow(aemProp, sample, edsVal = '', transformVal = '') {
 }
 
 function addCustomMapping() {
-  document.getElementById('mappingBody').insertAdjacentHTML('beforeend', mappingRow('', '', ''));
+  document.getElementById('mappingBody').insertAdjacentHTML('beforeend', mappingRow('', '', '', '', '', 'String'));
 }
 
 function filterMappingTable() {
@@ -226,13 +265,23 @@ async function saveMapping() {
   const mapping = [];
 
   rows.forEach(row => {
-    const aem = row.getAttribute('data-aem') || row.querySelector('input[type=text]:first-of-type')?.value.trim();
-    const eds = row.querySelector('.eds-input')?.value.trim();
-    const transform = row.querySelector('.transform-input')?.value || '';
-    if (aem && eds) {
-      const entry = { aem, eds };
-      if (transform) entry.transform = transform;
-      mapping.push(entry);
+    const isCustom  = row.getAttribute('data-custom') === '1';
+    const eds       = row.querySelector('.eds-input')?.value.trim();
+    if (!eds) return;
+
+    if (isCustom) {
+      // Constant / custom EDS property: literal value + AEM value type
+      const value     = row.querySelector('.value-input')?.value ?? '';
+      const valueType = row.querySelector('.type-input')?.value || 'String';
+      if (value !== '') mapping.push({ eds, value, valueType });
+    } else {
+      const aem       = row.getAttribute('data-aem');
+      const transform = row.querySelector('.transform-input')?.value || '';
+      if (aem) {
+        const entry = { aem, eds };
+        if (transform) entry.transform = transform;
+        mapping.push(entry);
+      }
     }
   });
 
@@ -277,9 +326,21 @@ function buildPagesTable(pages) {
 }
 
 function filterPagesTable() {
-  const q = document.getElementById('pageFilter').value.toLowerCase();
+  // Whole-segment match. Default (toggle off): only the page whose path ENDS with
+  // the segment — e.g. "who-we-are" → just .../who-we-are. Toggle on ("Include
+  // children"): also match descendant pages (.../who-we-are/**). Empty = show all.
+  const q = document.getElementById('pageFilter').value.trim().toLowerCase().replace(/^\/+|\/+$/g, '');
+  const subtree = document.getElementById('pageFilterSubtree')?.checked;
   document.querySelectorAll('#pagesBody tr').forEach(row => {
-    row.style.display = row.getAttribute('data-path')?.toLowerCase().includes(q) ? '' : 'none';
+    if (!q) { row.style.display = ''; return; }
+    const paths = [row.getAttribute('data-path'), row.getAttribute('data-target')]
+      .filter(Boolean)
+      .map(p => p.replace(/\/+$/, '').toLowerCase());
+    const seg = '/' + q;
+    const match = paths.some(p =>
+      p === q || p.endsWith(seg) || (subtree && p.includes(seg + '/'))
+    );
+    row.style.display = match ? '' : 'none';
   });
 }
 
@@ -323,6 +384,12 @@ function clientTransform(transform, val) {
     if (transform === 'dam-path-to-eds') {
       return String(v).replace('/content/dam/', '/content/dam/corporate/');
     }
+    if (transform === 'dam-to-dm-openapi') {
+      // Client can't reach the CSV — show the /corporate path as a placeholder.
+      // The Preview resolves the real DM URL via the server; the update always does.
+      const s = String(v);
+      return s.includes('/content/dam/corporate/') ? s : s.replace('/content/dam/', '/content/dam/corporate/');
+    }
     return v;
   };
   return Array.isArray(val) ? val.map(applyOne) : applyOne(String(val));
@@ -342,12 +409,48 @@ async function previewUpdate() {
 
   const selectedPages = allPages.filter(p => selected.includes(p.path));
 
+  // If any mapping resolves to a DM Open API URL, batch-resolve those source values
+  // against the selected asset-map environment so the preview shows the real DM URLs.
+  const dmEnv   = document.getElementById('metaAssetEnv')?.value || '';
+  const needsDm = mapping.some(m => m.transform === 'dam-to-dm-openapi');
+  let dmResolved = null;
+  if (needsDm && dmEnv) {
+    const inputs = [];
+    selectedPages.forEach(page => mapping.forEach(({ aem, transform }) => {
+      if (transform === 'dam-to-dm-openapi' && page.properties[aem] !== undefined) inputs.push(page.properties[aem]);
+    }));
+    try {
+      const resp = await fetchJSON('/api/meta/resolve-dm', { method: 'POST', body: { env: dmEnv, values: inputs } });
+      dmResolved = new Map(inputs.map((v, i) => [JSON.stringify(v), resp.resolved[i]]));
+    } catch (e) { alert('DM resolve failed: ' + (e.message || e)); }
+  } else if (needsDm && !dmEnv) {
+    alert('A mapping uses "DAM → DM Open API URL". Select an "Asset-map env" to preview the resolved DM URLs (otherwise the /corporate path is shown).');
+  }
+
+  // Constant / custom properties (no AEM source) — apply to every selected page; show once.
+  mapping.filter(m => !m.aem && m.eds && m.value !== undefined && m.value !== '').forEach(m => {
+    rowCount++;
+    const disp = m.valueType === 'String[]'
+      ? String(m.value).split(',').map(s => s.trim()).filter(Boolean).join(' | ')
+      : String(m.value);
+    tbody.insertAdjacentHTML('beforeend', `
+      <tr>
+        <td class="small text-muted fst-italic">(all selected pages)</td>
+        <td><span class="badge bg-secondary">constant</span></td>
+        <td class="text-muted small">${escHtml(m.valueType || 'String')}</td>
+        <td><code class="text-success">${escHtml(m.eds)}</code></td>
+        <td class="small text-warning fw-semibold">${escHtml(disp)}</td>
+      </tr>`);
+  });
+
   selectedPages.forEach(page => {
     mapping.forEach(({ aem, eds, transform }) => {
-      if (page.properties[aem] !== undefined) {
+      if (aem && page.properties[aem] !== undefined) {
         rowCount++;
         const sourceVal    = page.properties[aem];
-        const targetVal    = clientTransform(transform, sourceVal);
+        const targetVal    = (transform === 'dam-to-dm-openapi' && dmResolved && dmResolved.has(JSON.stringify(sourceVal)))
+          ? dmResolved.get(JSON.stringify(sourceVal))
+          : clientTransform(transform, sourceVal);
         const sourceDisplay = Array.isArray(sourceVal) ? sourceVal.join(' | ') : String(sourceVal);
         const targetDisplay = Array.isArray(targetVal) ? targetVal.join(' | ') : String(targetVal);
         const changed = sourceDisplay !== targetDisplay;
@@ -379,6 +482,11 @@ async function runUpdate() {
   const mapping = await fetchJSON('/api/meta/mapping');
   if (!mapping.length) return alert('No mapping defined. Go to Step 2 and save a mapping.');
 
+  const assetEnv = document.getElementById('metaAssetEnv')?.value || '';
+  if (mapping.some(m => m.transform === 'dam-to-dm-openapi') && !assetEnv) {
+    return alert('A mapping uses "DAM → DM Open API URL" — select an "Asset-map env" before running the update.');
+  }
+
   document.getElementById('updateProgressSection').style.display = 'block';
   document.getElementById('runBtn').disabled     = true;
   document.getElementById('previewBtn').disabled = true;
@@ -399,7 +507,7 @@ async function runUpdate() {
 
   await fetchJSON('/api/meta/update/start', {
     method: 'POST',
-    body: { selectedPaths: selected }
+    body: { selectedPaths: selected, assetEnv }
   });
 }
 
@@ -525,6 +633,22 @@ async function fetchJSON(url, opts = {}) {
 async function metaInit() {
   const cfg = await loadConfig();
   appConfig = cfg;
+  metaLoadAssetEnvs();
+}
+
+// Populate the asset-map environment dropdown (used by the DAM → DM Open API transform).
+// Only environments that already have a built CSV are offered.
+async function metaLoadAssetEnvs() {
+  const sel = document.getElementById('metaAssetEnv');
+  if (!sel) return;
+  try {
+    const data = await fetchJSON('/api/image/csv-status');
+    const built = (data.statuses || []).filter(s => s.exists);
+    sel.innerHTML = '<option value="">— none —</option>' +
+      built.map(s => `<option value="${escHtml(s.name)}">${escHtml(s.name)}</option>`).join('');
+  } catch {
+    sel.innerHTML = '<option value="">— none —</option>';
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

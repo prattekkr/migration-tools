@@ -121,7 +121,44 @@ function transformDamPath(val) {
   return String(val).replace('/content/dam/', '/content/dam/corporate/');
 }
 
-function applyTransform(transform, val) {
+// Idempotent /corporate insertion — never doubles it if already present.
+function insertCorporate(val) {
+  const s = String(val);
+  return s.includes('/content/dam/corporate/') ? s : s.replace('/content/dam/', '/content/dam/corporate/');
+}
+
+// DAM path → DM Open API URL: insert /corporate, look the path up in the asset-map
+// CSV, and return its openApiUrl. Falls back to the /corporate path if not found.
+function transformDamToDm(val, damPathMap) {
+  const corp      = insertCorporate(val);
+  const lookupKey = corp.split('?')[0].split('#')[0];   // strip query/fragment for the CSV key
+  return damPathMap?.get(lookupKey) || corp;
+}
+
+// Build path → openApiUrl map from an environment's asset-map CSV (or null if none).
+function loadDamPathMap(envName) {
+  const file = csvPath(envName || 'default');
+  if (!fs.existsSync(file)) return null;
+  const rows = parse(fs.readFileSync(file, 'utf8'), { columns: true, skip_empty_lines: true });
+  return new Map(rows.filter(r => r.path && r.openApiUrl).map(r => [r.path, r.openApiUrl]));
+}
+
+// Append a constant/custom EDS property (literal value + AEM value type) to a
+// URLSearchParams (Sling POST). Multi-value splits the value on commas.
+function appendConstant(params, eds, value, valueType) {
+  const t = valueType || 'String';
+  if (t === 'String[]') {
+    const vals = String(value).split(',').map(s => s.trim()).filter(Boolean);
+    vals.forEach(v => params.append(eds, v));
+    params.append(`${eds}@TypeHint`, 'String[]');
+  } else {
+    params.append(eds, String(value));
+    if (t !== 'String') params.append(`${eds}@TypeHint`, t);   // Boolean / Date / Long / Double
+  }
+}
+
+// ctx = { damPathMap } — required only for the 'dam-to-dm-openapi' transform
+function applyTransform(transform, val, ctx) {
   if (!transform) return val;
   if (transform === 'aem-tag-to-eds') {
     return Array.isArray(val)
@@ -130,6 +167,10 @@ function applyTransform(transform, val) {
   }
   if (transform === 'dam-path-to-eds') {
     return Array.isArray(val) ? val.map(transformDamPath) : transformDamPath(val);
+  }
+  if (transform === 'dam-to-dm-openapi') {
+    const map = ctx?.damPathMap;
+    return Array.isArray(val) ? val.map(v => transformDamToDm(v, map)) : transformDamToDm(val, map);
   }
   return val;
 }
@@ -264,8 +305,9 @@ app.post('/api/meta/verify-targets', async (req, res) => {
 
 // ─── Debug: preview what will be sent for a single page ──────────────────────
 app.post('/api/meta/debug-update', async (req, res) => {
-  const { pagePath } = req.body;
+  const { pagePath, assetEnv } = req.body;
   const mapping = loadMapping();
+  const damPathMap = mapping.some(m => m.transform === 'dam-to-dm-openapi') ? loadDamPathMap(assetEnv) : null;
 
   try {
     const sourceClient = makeClient(appConfig.source);
@@ -275,11 +317,20 @@ app.post('/api/meta/debug-update', async (req, res) => {
     const targetPath = pagePath.replace(appConfig.source.rootPath, appConfig.target.rootPath);
     const params = {};
 
-    for (const { aem, eds, transform } of mapping) {
-      if (aem && eds && pageProps[aem] !== undefined) {
-        const val = applyTransform(transform, pageProps[aem]);
-        params[eds] = Array.isArray(val) ? val : String(val);
-        if (Array.isArray(val)) params[`${eds}@TypeHint`] = 'String[]';
+    for (const { aem, eds, transform, value, valueType } of mapping) {
+      if (!eds) continue;
+      if (aem) {
+        if (pageProps[aem] !== undefined) {
+          const val = applyTransform(transform, pageProps[aem], { damPathMap });
+          params[eds] = Array.isArray(val) ? val : String(val);
+          if (Array.isArray(val)) params[`${eds}@TypeHint`] = 'String[]';
+        }
+      } else if (value !== undefined && value !== '') {
+        // Constant / custom property (debug preview representation)
+        params[eds] = valueType === 'String[]'
+          ? String(value).split(',').map(s => s.trim()).filter(Boolean)
+          : String(value);
+        if (valueType && valueType !== 'String') params[`${eds}@TypeHint`] = valueType;
       }
     }
 
@@ -296,6 +347,16 @@ app.post('/api/meta/debug-update', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ─── Resolve DAM paths → DM Open API URLs (for the client-side Preview) ──────
+app.post('/api/meta/resolve-dm', express.json({ limit: '2mb' }), (req, res) => {
+  const { env, values } = req.body;
+  const map = loadDamPathMap(env);
+  if (!map) return res.status(400).json({ error: `No asset-map CSV found for environment "${env || '(none)'}". Build it in the Image/Asset tool first.` });
+  const resolve = v => transformDamToDm(v, map);
+  const resolved = (values || []).map(v => (Array.isArray(v) ? v.map(resolve) : resolve(String(v))));
+  res.json({ resolved });
 });
 
 // ─── Bulk Update — SSE stream for progress ───────────────────────────────────
@@ -319,7 +380,7 @@ function broadcastUpdate() {
 }
 
 app.post('/api/meta/update/start', async (req, res) => {
-  const { selectedPaths } = req.body;
+  const { selectedPaths, assetEnv } = req.body;
 
   if (updateJob.running) {
     return res.status(409).json({ error: 'Update already in progress' });
@@ -328,6 +389,15 @@ app.post('/api/meta/update/start', async (req, res) => {
   const mapping = loadMapping();
   if (!mapping.length) {
     return res.status(400).json({ error: 'mapping.json is empty. Add mappings before running update.' });
+  }
+
+  // Load the asset-map CSV once if any mapping resolves to a DM Open API URL.
+  let damPathMap = null;
+  if (mapping.some(m => m.transform === 'dam-to-dm-openapi')) {
+    damPathMap = loadDamPathMap(assetEnv);
+    if (!damPathMap) {
+      return res.status(400).json({ error: `A mapping uses "DAM → DM Open API URL" but no asset-map CSV exists for environment "${assetEnv || '(none selected)'}". Build it in the Image/Asset tool first.` });
+    }
   }
 
   updateJob = { running: true, total: selectedPaths.length, done: 0, errors: 0, skipped: 0, log: [] };
@@ -346,15 +416,20 @@ app.post('/api/meta/update/start', async (req, res) => {
       const targetPath = pagePath.replace(appConfig.source.rootPath, appConfig.target.rootPath);
       const params = new URLSearchParams();
 
-      for (const { aem, eds, transform } of mapping) {
-        if (aem && eds && pageProps[aem] !== undefined) {
-          const val = applyTransform(transform, pageProps[aem]);
-          if (Array.isArray(val)) {
-            val.forEach(v => params.append(eds, v));
-            params.append(`${eds}@TypeHint`, 'String[]');
-          } else {
-            params.append(eds, String(val));
+      for (const { aem, eds, transform, value, valueType } of mapping) {
+        if (!eds) continue;
+        if (aem) {
+          if (pageProps[aem] !== undefined) {
+            const val = applyTransform(transform, pageProps[aem], { damPathMap });
+            if (Array.isArray(val)) {
+              val.forEach(v => params.append(eds, v));
+              params.append(`${eds}@TypeHint`, 'String[]');
+            } else {
+              params.append(eds, String(val));
+            }
           }
+        } else if (value !== undefined && value !== '') {
+          appendConstant(params, eds, value, valueType);   // custom constant property
         }
       }
 
