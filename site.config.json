@@ -12,7 +12,7 @@
       "damRoot": "/content/dam/corporate/abbvie-com2",
       "dmHost": "https://delivery-p157365-e1666158.adobeaemcloud.com"
     },
-{
+    {
       "name": "Test",
       "aemUrl": "https://author-p157365-e1665798.adobeaemcloud.com",
       "damRoot": "/content/dam/corporate/abbvie-com2",
@@ -24,5 +24,48 @@
       "damRoot": "/content/dam/corporate/abbvie-com2",
       "dmHost": "https://delivery-p157365-e1665873.adobeaemcloud.com"
     }
+  ],
+  "locales": [
+    {
+      "domain": "abbvie.com",
+      "liveCopyPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/us/en",
+      "blueprintPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/language-masters/us"
+    },
+    {
+      "domain": "abbvie.be",
+      "liveCopyPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/be",
+      "blueprintPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/language-masters/be"
+    },
+    {
+      "domain": "abbvie.gr",
+      "liveCopyPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/gr/el",
+      "blueprintPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/language-masters/gr"
+    },
+    {
+      "domain": "abbvie.nl",
+      "liveCopyPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/nl",
+      "blueprintPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/language-masters/nl"
+    },
+    {
+      "domain": "abbvie.at",
+      "liveCopyPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/at",
+      "blueprintPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/language-masters/at"
+    },
+    {
+      "domain": "abbvie.ca",
+      "liveCopyPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ca/en",
+      "blueprintPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/language-masters/ca"
+    },
+    {
+      "domain": "abbvie.com.au",
+      "liveCopyPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/au",
+      "blueprintPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/language-masters/au"
+    },
+{
+      "domain": "abbvie.co.nz",
+      "liveCopyPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/nz/en",
+      "blueprintPath": ""
+    }
+
   ]
 }

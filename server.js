@@ -804,6 +804,7 @@ app.post('/api/image/update-zip', (req, res, next) => {
 
         const directRow = pathMap.get(cleanPath);
         if (directRow) {
+          if (directRow.isCF === 'true') return match;   // content fragment — leave path unchanged
           replaced++;
           const finalUrl = applyParams(buildDmUrl(directRow));
           reportRows.push({ xmlFile: entry.entryName, oldUrl: rawPath, newUrl: finalUrl, matchType: 'direct', preset: presetName, modifiers: modifierStr });
@@ -1283,6 +1284,19 @@ function getFileLocaleRoot(entryName, siteRoot) {
   return siteRoot + '/' + localeSeg;
 }
 
+// Look up which domain owns a given localeRoot by matching against the explicit
+// liveCopyPath and blueprintPath entries in site.config.json locales.
+// Prefix matching handles sub-locales: /gr matches /gr/el, /language-masters/gr, etc.
+function getDomainForLocale(localeRoot, locales) {
+  if (!localeRoot || !locales?.length) return null;
+  for (const entry of locales) {
+    for (const root of [entry.liveCopyPath, entry.blueprintPath].filter(Boolean)) {
+      if (localeRoot === root || localeRoot.startsWith(root + '/')) return entry.domain;
+    }
+  }
+  return null;
+}
+
 // The site-qualifier segments (everything after /content/dam/) across the correct
 // root and the old roots — e.g. { corporate, abbvie-com2, abbvie-com }. These are
 // the segments that belong in the DAM root, so a stray copy left in the asset path
@@ -1551,10 +1565,18 @@ async function buildFixedZip(originalBuffer, fixes) {
 
         // 1. Fix absolute base-site URLs first → output /content/..., immune to short-path fixer.
         //    Embedded /content/dam/... refs get their DAM prefix normalized in the same step.
-        if (fixes.absBaseUrl?.baseDomain && localeRoot) {
-          const r = fixAbsBaseUrl(after, fixes.absBaseUrl.baseDomain, localeRoot, damCfg);
-          after = r.result;
-          for (const c of r.changes) changes.push({ file, type: 'abbvie-abs', ...c });
+        //    When a localeMap is configured (from site.config.json locales), only convert links
+        //    whose domain matches the domain assigned to this file's locale — links pointing to
+        //    another locale's domain (e.g. abbvie.com links on an abbvie.gr page) are left as-is.
+        if (fixes.absBaseUrl && localeRoot) {
+          const domainForLocale = fixes.absBaseUrl.locales?.length
+            ? getDomainForLocale(localeRoot, fixes.absBaseUrl.locales)  // prefix match vs liveCopyPath + blueprintPath
+            : fixes.absBaseUrl.baseDomain;                              // legacy fallback: no locales configured
+          if (domainForLocale) {
+            const r = fixAbsBaseUrl(after, domainForLocale, localeRoot, damCfg);
+            after = r.result;
+            for (const c of r.changes) changes.push({ file, type: 'abbvie-abs', ...c });
+          }
         }
         // 2. Fix Scene7 URLs via CSV lookup
         if (fixes.scene7?.lookupMap) {
@@ -1748,6 +1770,16 @@ app.post('/api/link-checker/fix-issues', express.json({ limit: '2mb' }), async (
         pathMap: pmap,
         damNorm: { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] },
       };
+    }
+
+    // Enrich absBaseUrl fix with the locales array from site.config.json.
+    // getDomainForLocale() does prefix matching against liveCopyPath and blueprintPath,
+    // so /gr, /gr/el, and /language-masters/gr all resolve to the same domain.
+    if (fixes.absBaseUrl) {
+      const siteConf = loadSiteConfig();
+      if (siteConf.locales?.length) {
+        fixes.absBaseUrl.locales = siteConf.locales;
+      }
     }
 
     // Resolve optional HEAD-validation config (env → AEM author host from site.config)
