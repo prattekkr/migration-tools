@@ -3,7 +3,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 function switchTool(name) {
-  ['pkgupd', 'meta', 'image', 'linkchecker', 'pkg', 'info'].forEach(t => {
+  ['pkgupd', 'meta', 'propupdater', 'image', 'linkchecker', 'pkg', 'lighthouse', 'info'].forEach(t => {
     document.getElementById(`tool-${t}`).style.display = name === t ? 'block' : 'none';
     document.getElementById(`tool-btn-${t}`).classList.toggle('active', name === t);
   });
@@ -166,11 +166,18 @@ async function buildMappingTable() {
 
   // Discovered AEM properties → source-mapped rows
   allProps.forEach(prop => {
-    const sample     = samples[prop] || '';
-    const saved      = savedMap[prop];
-    const edsVal     = saved?.eds || '';
+    const sample       = samples[prop] || '';
+    const saved        = savedMap[prop];
+    const edsVal       = saved?.eds || '';
     const transformVal = saved?.transform || '';
-    tbody.insertAdjacentHTML('beforeend', mappingRow(prop, sample, edsVal, transformVal));
+    const typeHint     = saved?.typeHint || '';
+    tbody.insertAdjacentHTML('beforeend', mappingRow(prop, sample, edsVal, transformVal, '', 'String', false, typeHint));
+  });
+
+  // Saved manual AEM-source rows (typed in by user) that are not in discoveredProps
+  const allPropsSet = new Set(allProps);
+  savedList.filter(m => m.aem && m.manual && !allPropsSet.has(m.aem)).forEach(m => {
+    tbody.insertAdjacentHTML('beforeend', mappingRow(m.aem, '', m.eds, m.transform || '', '', 'String', true, m.typeHint || ''));
   });
 
   // Saved constant (custom) properties → constant rows (no AEM source)
@@ -210,37 +217,73 @@ function valueTypeOptions(selected = 'String') {
   ).join('');
 }
 
-// A row is a "constant" (custom EDS property with a literal value) when it has no AEM source.
-// Constant rows: enter EDS name + Value + Type. Source rows: map AEM prop + Transform.
-function mappingRow(aemProp, sample, edsVal = '', transformVal = '', value = '', valueType = 'String') {
-  const custom = !aemProp;
-  const sid = `eds_${(aemProp || 'custom_' + Math.random().toString(36).slice(2, 8)).replace(/[^a-zA-Z0-9]/g, '_')}`;
-  const aemCell = custom
-    ? `<input type="text" class="form-control form-control-sm aem-input" placeholder="(constant)" disabled />`
-    : `<code class="text-primary">${escHtml(aemProp)}</code>`;
+// Type hint options for AEM-source rows — "auto" defers to array detection at runtime;
+// setting String[] forces @TypeHint=String[] even when AEM serialises a single value as a plain string.
+const TYPE_HINTS = [
+  { value: '',         label: 'auto (detect from source)' },
+  { value: 'String[]', label: 'String[] (force multi-value)' },
+  { value: 'Boolean',  label: 'Boolean' },
+  { value: 'Date',     label: 'Date' },
+  { value: 'Long',     label: 'Long' },
+  { value: 'Double',   label: 'Double' },
+];
+
+function typeHintOptions(selected = '') {
+  return TYPE_HINTS.map(t =>
+    `<option value="${t.value}" ${t.value === selected ? 'selected' : ''}>${escHtml(t.label)}</option>`
+  ).join('');
+
+}
+
+// Row types:
+//   discovered (aemProp set, manualAem false) — AEM cell is a read-only <code> tag
+//   manual     (aemProp set, manualAem true)  — AEM cell is an editable input; user typed the property name
+//   constant   (aemProp empty, manualAem false) — no AEM source; literal value written to every page
+// typeHint (AEM-source rows only): forces @TypeHint on the Sling POST even when AEM serialises a
+//   single-value String[] as a plain string. Empty = auto-detect from whether value is array.
+function mappingRow(aemProp, sample, edsVal = '', transformVal = '', value = '', valueType = 'String', manualAem = false, typeHint = '') {
+  const isConstant = !aemProp && !manualAem;
+  const isManual   = manualAem;
+  const sid = `eds_${(aemProp || 'row_' + Math.random().toString(36).slice(2, 8)).replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+  let aemCell;
+  if (isConstant) {
+    aemCell = `<input type="text" class="form-control form-control-sm aem-input" placeholder="(constant)" disabled />`;
+  } else if (isManual) {
+    aemCell = `<input type="text" class="form-control form-control-sm aem-input" placeholder="AEM property name" value="${escHtml(aemProp)}" />`;
+  } else {
+    aemCell = `<code class="text-primary">${escHtml(aemProp)}</code>`;
+  }
+
+  const badge = isConstant ? '<span class="badge bg-secondary me-1">constant</span>'
+              : isManual   ? '<span class="badge bg-info text-dark me-1">manual</span>'
+              : '';
+
+  // Constants use valueTypeOptions (the type written to Sling); AEM-source rows use typeHintOptions
+  // (override for when AEM serialises a single-value String[] as a plain string).
+  const typeCell = isConstant
+    ? `<select class="form-select form-select-sm type-input">${valueTypeOptions(valueType)}</select>`
+    : `<select class="form-select form-select-sm type-input" title="Force @TypeHint on the Sling POST. Use String[] when AEM may return a single-value multi-value property as a plain string.">${typeHintOptions(typeHint)}</select>`;
+
   return `
-    <tr data-aem="${escHtml(aemProp)}" data-custom="${custom ? '1' : '0'}">
-      <td>${custom ? '<span class="badge bg-secondary">constant</span>' : aemCell}</td>
+    <tr data-aem="${escHtml(aemProp)}" data-custom="${isConstant ? '1' : '0'}" data-manual="${isManual ? '1' : '0'}">
+      <td>${badge}${aemCell}</td>
       <td class="text-muted small text-truncate" style="max-width:150px" title="${escHtml(sample)}">${escHtml(sample)}</td>
       <td>
         <input type="text" class="form-control form-control-sm eds-input" id="${sid}"
           placeholder="eds property name" value="${escHtml(edsVal)}" />
       </td>
       <td>
-        <select class="form-select form-select-sm transform-input" ${custom ? 'disabled title="constants are not transformed"' : ''}>
+        <select class="form-select form-select-sm transform-input" ${isConstant ? 'disabled title="constants are not transformed"' : ''}>
           ${transformOptions(transformVal)}
         </select>
       </td>
       <td>
         <input type="text" class="form-control form-control-sm value-input"
-          placeholder="${custom ? 'literal value (comma-separated for multi)' : '— from source —'}"
-          value="${escHtml(value)}" ${custom ? '' : 'disabled'} />
+          placeholder="${isConstant ? 'literal value (comma-separated for multi)' : '— from source —'}"
+          value="${escHtml(value)}" ${isConstant ? '' : 'disabled'} />
       </td>
-      <td>
-        <select class="form-select form-select-sm type-input" ${custom ? '' : 'disabled'}>
-          ${valueTypeOptions(valueType)}
-        </select>
-      </td>
+      <td>${typeCell}</td>
       <td>
         <button class="btn btn-sm btn-link text-danger p-0" onclick="this.closest('tr').remove()" title="Remove">
           <i class="bi bi-trash"></i>
@@ -251,6 +294,10 @@ function mappingRow(aemProp, sample, edsVal = '', transformVal = '', value = '',
 
 function addCustomMapping() {
   document.getElementById('mappingBody').insertAdjacentHTML('beforeend', mappingRow('', '', '', '', '', 'String'));
+}
+
+function addAemSourceMapping() {
+  document.getElementById('mappingBody').insertAdjacentHTML('beforeend', mappingRow('', '', '', '', '', 'String', true));
 }
 
 function filterMappingTable() {
@@ -275,11 +322,18 @@ async function saveMapping() {
       const valueType = row.querySelector('.type-input')?.value || 'String';
       if (value !== '') mapping.push({ eds, value, valueType });
     } else {
-      const aem       = row.getAttribute('data-aem');
+      const isManual  = row.getAttribute('data-manual') === '1';
+      // Manual rows have an editable AEM input; discovered rows store the prop in data-aem
+      const aem       = isManual
+        ? row.querySelector('.aem-input')?.value.trim()
+        : row.getAttribute('data-aem');
       const transform = row.querySelector('.transform-input')?.value || '';
+      const typeHint  = row.querySelector('.type-input')?.value || '';
       if (aem) {
         const entry = { aem, eds };
         if (transform) entry.transform = transform;
+        if (typeHint)  entry.typeHint  = typeHint;
+        if (isManual)  entry.manual    = true;
         mapping.push(entry);
       }
     }
@@ -672,10 +726,12 @@ async function loadEnvironments() {
     const select       = document.getElementById('envSelect');
     const targetSelect = document.getElementById('targetEnvSelect');
     const swapSelect   = document.getElementById('swapTargetEnv');
+    const ppSelect     = document.getElementById('ppEnv');
 
     select.innerHTML       = '<option value="">— Select environment —</option>';
     targetSelect.innerHTML = '<option value="">— Select target environment —</option>';
     swapSelect.innerHTML   = '<option value="">— Select target environment —</option>';
+    if (ppSelect) ppSelect.innerHTML = '<option value="">— Select environment —</option>';
 
     environments.forEach((env, i) => {
       const opt = document.createElement('option');
@@ -692,6 +748,13 @@ async function loadEnvironments() {
       sOpt.value = env.name;
       sOpt.textContent = env.name;
       swapSelect.appendChild(sOpt);
+
+      if (ppSelect) {
+        const pOpt = document.createElement('option');
+        pOpt.value = env.name;
+        pOpt.textContent = env.name;
+        ppSelect.appendChild(pOpt);
+      }
     });
 
     show('envSelectorWrap');
@@ -2214,6 +2277,460 @@ async function puProcess() {
     btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Process &amp; Download ZIP';
   }
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LIGHTHOUSE AUDIT
+// ══════════════════════════════════════════════════════════════════════════════
+
+let lhResults     = [];
+let lhActiveTier  = 'all';
+
+function lhSyncThrottleHint() {
+  const strategy = document.querySelector('input[name="lhStrategy"]:checked')?.value || 'mobile';
+  const hint = document.getElementById('lhThrottleHint');
+  if (!hint) return;
+  hint.textContent = strategy === 'mobile'
+    ? 'Auto → simulate: consistent scores, no CPU-contention between parallel tabs.'
+    : 'Auto → devtools: matches Chrome DevTools Lighthouse panel exactly.';
+}
+
+function lhTier(score) {
+  if (score === null || score === undefined) return 'error';
+  if (score > 90)  return 'excellent';
+  if (score >= 80) return 'good';
+  if (score >= 60) return 'needs';
+  return 'poor';
+}
+
+function lhScoreBadge(score) {
+  if (score === null || score === undefined) return '<span class="badge bg-secondary">–</span>';
+  const palette = {
+    excellent: 'background:#198754;color:#fff',
+    good:      'background:#ffc107;color:#212529',
+    needs:     'background:#fd7e14;color:#fff',
+    poor:      'background:#dc3545;color:#fff',
+  };
+  const style = palette[lhTier(score)] || '';
+  return `<span class="badge" style="${style}">${score}</span>`;
+}
+
+function lhUpdateSummary(results) {
+  const counts = { excellent: 0, good: 0, needs: 0, poor: 0 };
+  for (const r of results) {
+    const t = r.status === 'error' ? 'poor' : lhTier(r.scores?.performance);
+    if (t in counts) counts[t]++;
+  }
+  document.getElementById('lhCountExcellent').textContent = counts.excellent;
+  document.getElementById('lhCountGood').textContent      = counts.good;
+  document.getElementById('lhCountNeeds').textContent     = counts.needs;
+  document.getElementById('lhCountPoor').textContent      = counts.poor;
+}
+
+function lhRenderTable(results) {
+  document.getElementById('lhTableBody').innerHTML = results.map(r => {
+    if (r.status === 'error') {
+      return `<tr data-tier="poor">
+        <td class="font-monospace small" style="word-break:break-all">
+          <a href="${escHtml(r.url)}" target="_blank" rel="noopener" class="text-decoration-none">${escHtml(r.url)}</a>
+        </td>
+        <td colspan="8" class="text-danger small"><i class="bi bi-exclamation-circle me-1"></i>${escHtml(r.error || 'Audit failed')}</td>
+      </tr>`;
+    }
+    const s = r.scores  || {};
+    const m = r.metrics || {};
+    return `<tr data-tier="${lhTier(s.performance)}">
+      <td class="font-monospace small" style="word-break:break-all">
+        <a href="${escHtml(r.url)}" target="_blank" rel="noopener" class="text-decoration-none">${escHtml(r.url)}</a>
+      </td>
+      <td class="text-center">${lhScoreBadge(s.performance)}</td>
+      <td class="text-center">${lhScoreBadge(s.seo)}</td>
+      <td class="text-center">${lhScoreBadge(s.accessibility)}</td>
+      <td class="text-center">${lhScoreBadge(s.bestPractices)}</td>
+      <td class="text-center small text-muted">${escHtml(m.fcp)}</td>
+      <td class="text-center small text-muted">${escHtml(m.lcp)}</td>
+      <td class="text-center small text-muted">${escHtml(m.tbt)}</td>
+      <td class="text-center small text-muted">${escHtml(m.cls)}</td>
+    </tr>`;
+  }).join('');
+
+  filterLhTier(lhActiveTier);
+}
+
+function filterLhTier(tier) {
+  lhActiveTier = tier;
+  document.querySelectorAll('#lhTierFilter button').forEach(btn => {
+    const active = btn.getAttribute('data-tier') === tier;
+    const map = { all: ['btn-dark','btn-outline-dark'], excellent: ['btn-success','btn-outline-success'],
+                  good: ['btn-warning','btn-outline-warning'], poor: ['btn-danger','btn-outline-danger'] };
+    if (btn.getAttribute('data-tier') === 'needs') {
+      btn.style.background  = active ? '#fd7e14' : '';
+      btn.style.color       = active ? '#fff'    : '#fd7e14';
+      btn.style.borderColor = '#fd7e14';
+    } else {
+      const [solid, outline] = map[btn.getAttribute('data-tier')] || ['btn-secondary','btn-outline-secondary'];
+      btn.classList.toggle(solid,   active);
+      btn.classList.toggle(outline, !active);
+    }
+  });
+  lhApplyFilters();
+}
+
+function lhApplyFilters() {
+  const q = (document.getElementById('lhSearch')?.value || '').toLowerCase();
+  document.querySelectorAll('#lhTableBody tr').forEach(row => {
+    const tierMatch = lhActiveTier === 'all' || row.getAttribute('data-tier') === lhActiveTier;
+    const urlText   = row.querySelector('a')?.textContent.toLowerCase() || '';
+    const textMatch = !q || urlText.includes(q);
+    row.style.display = (tierMatch && textMatch) ? '' : 'none';
+  });
+}
+
+async function runLighthouse() {
+  const urlsRaw = document.getElementById('lhUrls').value.trim();
+  const urls    = urlsRaw.split('\n').map(s => s.trim()).filter(Boolean);
+  if (!urls.length) { alert('Enter at least one URL.'); return; }
+
+  const strategy     = document.querySelector('input[name="lhStrategy"]:checked')?.value || 'mobile';
+  const categories   = [...document.querySelectorAll('[id^="lhCat"]:checked')].map(el => el.value);
+  if (!categories.length) { alert('Select at least one category.'); return; }
+
+  const concurrency  = Math.max(1, Math.min(10, parseInt(document.getElementById('lhConcurrency')?.value, 10) || 3));
+  const headless     = document.getElementById('lhHeadless')?.checked ?? false;
+  const throttleSel  = document.getElementById('lhThrottling')?.value || 'auto';
+  // auto: mobile → simulate (avoids CPU-contention variance under parallel load),
+  //       desktop → devtools (matches Chrome DevTools panel exactly)
+  const throttlingMethod = throttleSel === 'auto'
+    ? (strategy === 'mobile' ? 'simulate' : 'devtools')
+    : throttleSel;
+
+  const btn = document.getElementById('lhRunBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Auditing…';
+
+  lhResults    = [];
+  lhActiveTier = 'all';
+  hide('lhSummary');
+  hide('lhResults');
+  hide('lhEmpty');
+  show('lhProgress');
+  document.getElementById('lhProgressBar').style.width = '0%';
+  document.getElementById('lhProgressText').textContent    = `0 / ${urls.length}`;
+  document.getElementById('lhProgressCurrent').textContent = '';
+
+  try {
+    const { sessionId, error } = await fetchJSON('/api/lighthouse/start', {
+      method: 'POST', body: { urls, strategy, categories, concurrency, headless, throttlingMethod },
+    });
+    if (error) throw new Error(error);
+
+    await new Promise((resolve, reject) => {
+      const es = new EventSource(`/api/lighthouse/progress/${sessionId}`);
+      es.onmessage = ({ data }) => {
+        try {
+          const msg = JSON.parse(data);
+          const done  = msg.done  ?? 0;
+          const total = msg.total ?? urls.length;
+          const pct   = total ? Math.round(done / total * 100) : 0;
+
+          document.getElementById('lhProgressBar').style.width     = `${pct}%`;
+          document.getElementById('lhProgressText').textContent    = `${done} / ${total}`;
+          // Show the URL currently being audited (last result + 1)
+          const next = msg.results?.[done]?.url ?? (done < urls.length ? urls[done] : '');
+          document.getElementById('lhProgressCurrent').textContent = next ? `Auditing: ${next}` : '';
+
+          if (msg.results?.length) {
+            lhResults = msg.results;
+            lhUpdateSummary(lhResults);
+            lhRenderTable(lhResults);
+            // .row needs display:flex (Bootstrap), not the block set by show()
+            document.getElementById('lhSummary').style.display = '';
+            document.getElementById('lhResults').style.display = 'flex';
+          }
+          if (msg.running === false) { es.close(); resolve(); }
+        } catch { /* ignore parse errors */ }
+      };
+      es.onerror = () => { es.close(); reject(new Error('Connection to audit stream lost.')); };
+    });
+  } catch (err) {
+    alert('Audit failed: ' + err.message);
+  } finally {
+    hide('lhProgress');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run Audit';
+  }
+}
+
+function exportLhCsv() {
+  if (!lhResults.length) return;
+  const header = ['URL','Status','Performance','SEO','Accessibility','Best Practices','FCP','LCP','TBT','CLS','Tier'];
+  const rows   = lhResults.map(r => {
+    if (r.status === 'error') return [r.url, 'error', '', '', '', '', '', '', '', '', ''];
+    const s = r.scores || {}, m = r.metrics || {};
+    return [r.url, 'ok', s.performance ?? '', s.seo ?? '', s.accessibility ?? '', s.bestPractices ?? '',
+            m.fcp, m.lcp, m.tbt, m.cls, lhTier(s.performance)];
+  });
+  const csv  = [header, ...rows].map(r => r.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a    = Object.assign(document.createElement('a'), {
+    href:     URL.createObjectURL(new Blob([csv], { type: 'text/csv' })),
+    download: 'lighthouse-report.csv',
+  });
+  a.click();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROPERTY UPDATER TOOL
+// ══════════════════════════════════════════════════════════════════════════════
+
+let ppPages     = [];
+let ppUpdateSSE = null;
+
+function ppShowAlert(type, msg) {
+  document.getElementById('ppAlert').innerHTML =
+    `<div class="alert alert-${type} alert-dismissible py-2 mb-0">
+      ${msg}
+      <button type="button" class="btn-close btn-sm" data-bs-dismiss="alert"></button>
+    </div>`;
+}
+
+const PP_NODE_DEFAULTS = { page: 'jcr:content', asset: 'jcr:content/metadata' };
+
+function ppOnContentTypeChange() {
+  const type = val('ppContentType') || 'page';
+  const other = type === 'page' ? PP_NODE_DEFAULTS.asset : PP_NODE_DEFAULTS.page;
+  const patternInput = document.getElementById('ppNodePattern');
+  if (!patternInput.value.trim() || patternInput.value.trim() === other) {
+    patternInput.value = PP_NODE_DEFAULTS[type];
+  }
+  document.getElementById('ppRootPath').placeholder = type === 'asset'
+    ? '/content/dam/site/images'
+    : '/content/site/us/en/about';
+}
+
+function ppDiscover() {
+  const env = val('ppEnv');
+  if (!env) return ppShowAlert('warning', 'Select a target environment.');
+  const rootPath = val('ppRootPath');
+  if (!rootPath) return ppShowAlert('warning', 'Root path is required.');
+
+  const contentType  = val('ppContentType') || 'page';
+  const nodePattern  = val('ppNodePattern') || PP_NODE_DEFAULTS[contentType];
+  const propertyName = val('ppPropName');
+
+  const btn = document.getElementById('ppDiscoverBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Discovering...';
+
+  document.getElementById('ppDiscoverProgressWrap').style.display = 'block';
+  document.getElementById('ppPagesCard').style.display = 'none';
+  document.getElementById('ppAlert').innerHTML = '';
+  setProgress('ppDiscoverProgress', 'ppDiscoverProgressLabel', 0, 1, 'Connecting...');
+
+  const qs = new URLSearchParams({ env, rootPath, nodePattern, propertyName, contentType });
+  const es = new EventSource(`/api/prop-updater/discover?${qs.toString()}`);
+
+  const finish = () => {
+    es.close();
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-search me-2"></i>Re-discover';
+  };
+
+  es.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'status') {
+      document.getElementById('ppDiscoverProgressLabel').textContent = data.message;
+    }
+    if (data.type === 'total') {
+      document.getElementById('ppDiscoverStats').textContent = `Found ${data.total} item(s)`;
+    }
+    if (data.type === 'progress') {
+      setProgress('ppDiscoverProgress', 'ppDiscoverProgressLabel',
+        data.done, data.total, `Checking ${data.done} / ${data.total} item(s)...`);
+    }
+    if (data.type === 'complete') {
+      finish();
+      document.getElementById('ppDiscoverStats').textContent =
+        `${data.total} item(s) · ${data.nodeExistsCount} with "${nodePattern}"`;
+      setProgress('ppDiscoverProgress', 'ppDiscoverProgressLabel', 1, 1, 'Discovery complete.');
+      ppLoadPages();
+    }
+    if (data.type === 'error') {
+      finish();
+      ppShowAlert('danger', `Error: ${escHtml(data.message)}`);
+    }
+  };
+
+  es.onerror = () => finish();
+}
+
+async function ppLoadPages() {
+  const data = await fetchJSON('/api/prop-updater/pages');
+  ppPages = data.pages || [];
+  ppBuildPagesTable(ppPages);
+}
+
+function ppBuildPagesTable(pages) {
+  const tbody = document.getElementById('ppPagesBody');
+  tbody.innerHTML = '';
+  document.getElementById('ppPagesCard').style.display = pages.length ? 'block' : 'none';
+
+  const contentType = val('ppContentType') || 'page';
+  const nodePattern = val('ppNodePattern') || PP_NODE_DEFAULTS[contentType];
+
+  pages.forEach(page => {
+    const currentDisplay = (page.currentValue === null || page.currentValue === undefined)
+      ? '<span class="text-muted">—</span>'
+      : escHtml(page.currentValue);
+    tbody.insertAdjacentHTML('beforeend', `
+      <tr data-path="${escHtml(page.path)}">
+        <td><input type="checkbox" class="pp-page-chk" onchange="ppUpdateSelectionCount()" /></td>
+        <td class="small font-monospace">${escHtml(page.path)}</td>
+        <td class="small ${page.nodeExists ? 'text-success' : 'text-warning'}">${page.nodeExists ? escHtml(nodePattern) : 'missing'}</td>
+        <td class="small">${currentDisplay}</td>
+        <td><span class="pp-status-cell text-muted">—</span></td>
+      </tr>`);
+  });
+
+  ppUpdateSelectionCount();
+}
+
+function ppFilterPagesTable() {
+  const q = document.getElementById('ppPageFilter').value.trim().toLowerCase();
+  document.querySelectorAll('#ppPagesBody tr').forEach(row => {
+    row.style.display = (!q || row.getAttribute('data-path').toLowerCase().includes(q)) ? '' : 'none';
+  });
+}
+
+function ppSelectAll() {
+  document.querySelectorAll('.pp-page-chk').forEach(c => c.checked = true);
+  document.getElementById('ppSelectAllChk').checked = true;
+  ppUpdateSelectionCount();
+}
+
+function ppDeselectAll() {
+  document.querySelectorAll('.pp-page-chk').forEach(c => c.checked = false);
+  document.getElementById('ppSelectAllChk').checked = false;
+  ppUpdateSelectionCount();
+}
+
+function ppSelectMissingOnly() {
+  document.querySelectorAll('#ppPagesBody tr').forEach((row, i) => {
+    row.querySelector('.pp-page-chk').checked = !ppPages[i]?.nodeExists;
+  });
+  document.getElementById('ppSelectAllChk').checked = false;
+  ppUpdateSelectionCount();
+}
+
+function ppToggleAll(chk) {
+  document.querySelectorAll('.pp-page-chk').forEach(c => c.checked = chk.checked);
+  ppUpdateSelectionCount();
+}
+
+function ppUpdateSelectionCount() {
+  const n = document.querySelectorAll('.pp-page-chk:checked').length;
+  document.getElementById('ppSelectionCount').textContent = `${n} item${n !== 1 ? 's' : ''} selected`;
+}
+
+function ppGetSelectedPaths() {
+  return [...document.querySelectorAll('#ppPagesBody tr')]
+    .filter(r => r.querySelector('.pp-page-chk')?.checked)
+    .map(r => r.getAttribute('data-path'));
+}
+
+async function ppRunUpdate() {
+  const env = val('ppEnv');
+  if (!env) return alert('Select a target environment.');
+  const selected = ppGetSelectedPaths();
+  if (!selected.length) return alert('Select at least one item.');
+
+  const contentType = val('ppContentType') || 'page';
+  const propertyName = val('ppPropName');
+  if (!propertyName) return alert('Property name is required.');
+  const propertyValue = val('ppPropValue');
+  if (!propertyValue) return alert('Property value is required.');
+
+  if (!confirm(`Set "${propertyName}" = "${propertyValue}" on ${selected.length} item(s)?`)) return;
+
+  document.getElementById('ppUpdateProgressSection').style.display = 'block';
+  document.getElementById('ppRunBtn').disabled = true;
+  document.getElementById('ppUpdateLog').innerHTML = '';
+  ppResetStats();
+
+  if (ppUpdateSSE) ppUpdateSSE.close();
+  ppUpdateSSE = new EventSource('/api/prop-updater/update/progress');
+  ppUpdateSSE.onmessage = (e) => {
+    const job = JSON.parse(e.data);
+    ppRenderProgress(job);
+    if (!job.running) {
+      ppUpdateSSE.close();
+      document.getElementById('ppRunBtn').disabled = false;
+    }
+  };
+
+  const res = await fetchJSON('/api/prop-updater/update/start', {
+    method: 'POST',
+    body: {
+      selectedPaths: selected,
+      env,
+      contentType,
+      nodePattern:   val('ppNodePattern') || PP_NODE_DEFAULTS[contentType],
+      propertyName,
+      propertyValue,
+      valueType:     val('ppPropType') || 'String',
+    }
+  });
+  if (res.error) {
+    ppShowAlert('danger', escHtml(res.error));
+    document.getElementById('ppRunBtn').disabled = false;
+    if (ppUpdateSSE) ppUpdateSSE.close();
+  }
+}
+
+function ppRenderProgress(job) {
+  document.getElementById('ppStatTotal').textContent  = job.total;
+  document.getElementById('ppStatDone').textContent   = job.done - job.errors;
+  document.getElementById('ppStatErrors').textContent = job.errors;
+
+  const pct = job.total ? Math.round((job.done / job.total) * 100) : 0;
+  const bar = document.getElementById('ppUpdateProgressBar');
+  bar.style.width = pct + '%';
+  bar.className = 'progress-bar' + (job.running ? ' progress-bar-striped progress-bar-animated' : '') +
+    (job.errors > 0 && !job.running ? ' bg-warning' : '');
+  document.getElementById('ppUpdateProgressLabel').textContent =
+    job.running ? `Processing ${job.done} of ${job.total}...` : `Complete — ${job.total} items processed`;
+
+  const tbody = document.getElementById('ppUpdateLog');
+  const existingCount = tbody.querySelectorAll('tr').length;
+  const newEntries = job.log.slice(existingCount);
+
+  newEntries.forEach(entry => {
+    const badgeClass = entry.status === 'success' ? 'bg-success' : 'bg-danger';
+    tbody.insertAdjacentHTML('beforeend', `
+      <tr>
+        <td class="small font-monospace">${escHtml(entry.pagePath)}</td>
+        <td><span class="badge ${badgeClass}">${entry.status}</span></td>
+        <td class="small text-muted">${escHtml(entry.message || '')}</td>
+      </tr>`);
+  });
+
+  job.log.forEach(entry => {
+    const row = document.querySelector(`#ppPagesBody tr[data-path="${CSS.escape(entry.pagePath)}"]`);
+    if (row) {
+      const cell = row.querySelector('.pp-status-cell');
+      cell.className = `pp-status-cell ${entry.status === 'success' ? 'text-success' : 'text-danger'}`;
+      cell.innerHTML = entry.status === 'success'
+        ? '<i class="bi bi-check-circle-fill"></i>'
+        : '<i class="bi bi-x-circle-fill"></i>';
+    }
+  });
+}
+
+function ppResetStats() {
+  ['ppStatTotal', 'ppStatDone', 'ppStatErrors'].forEach(id => document.getElementById(id).textContent = '0');
+  document.getElementById('ppUpdateProgressBar').style.width = '0%';
+  document.getElementById('ppUpdateProgressLabel').textContent = '';
+}
+
+function ppExportLog() { window.location.href = '/api/prop-updater/export/log'; }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // BOOTSTRAP

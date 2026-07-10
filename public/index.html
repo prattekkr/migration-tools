@@ -29,6 +29,11 @@
       </button>
     </li>
     <li class="nav-item">
+      <button class="nav-link" id="tool-btn-propupdater" onclick="switchTool('propupdater')">
+        <i class="bi bi-pencil-square me-1"></i>Property Updater
+      </button>
+    </li>
+    <li class="nav-item">
       <button class="nav-link" id="tool-btn-image" onclick="switchTool('image')">
         <i class="bi bi-images me-1"></i>Image / Asset
       </button>
@@ -41,6 +46,11 @@
     <li class="nav-item">
       <button class="nav-link" id="tool-btn-pkg" onclick="switchTool('pkg')">
         <i class="bi bi-box-seam me-1"></i>Package Creator
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" id="tool-btn-lighthouse" onclick="switchTool('lighthouse')">
+        <i class="bi bi-speedometer2 me-1"></i>Lighthouse
       </button>
     </li>
     <li class="nav-item">
@@ -175,8 +185,11 @@
             <div class="text-muted small">Map each AEM property to its EDS equivalent. Leave blank to skip.</div>
           </div>
           <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-info" onclick="addAemSourceMapping()" title="Add a row for an AEM property not in the discovered list">
+              <i class="bi bi-plus me-1"></i>Add AEM Property
+            </button>
             <button class="btn btn-sm btn-outline-secondary" onclick="addCustomMapping()">
-              <i class="bi bi-plus me-1"></i>Add Custom Row
+              <i class="bi bi-plus me-1"></i>Add Constant
             </button>
             <button class="btn btn-sm btn-primary" onclick="saveMapping()">
               <i class="bi bi-save me-1"></i>Save Mapping
@@ -197,8 +210,8 @@
                 <th style="width:15%">Sample Value</th>
                 <th style="width:19%">EDS Property Name</th>
                 <th style="width:17%">Transform</th>
-                <th style="width:17%">Value <span class="fw-normal text-white-50">(custom)</span></th>
-                <th style="width:12%">Type</th>
+                <th style="width:17%">Value <span class="fw-normal text-white-50">(constant)</span></th>
+                <th style="width:12%">Type / Hint</th>
                 <th style="width:4%"></th>
               </tr>
             </thead>
@@ -323,6 +336,158 @@
 
   </div><!-- /main-content -->
 </div><!-- /#tool-meta -->
+
+
+<!-- ══ PROPERTY UPDATER TOOL ════════════════════════════════════════════════ -->
+<div id="tool-propupdater" style="display:none">
+  <div class="main-content px-4 py-4">
+
+    <div class="card mb-4">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="bi bi-pencil-square text-primary"></i>
+        <strong>Bulk Property Update</strong>
+        <span class="text-muted small ms-2">Sets one property on every matched page or asset (or a node under it) beneath a root path.</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-3">
+            <label class="form-label">Content Type</label>
+            <select class="form-select" id="ppContentType" onchange="ppOnContentTypeChange()">
+              <option value="page">Page (cq:Page)</option>
+              <option value="asset">Asset (dam:Asset)</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Environment</label>
+            <select class="form-select" id="ppEnv">
+              <option value="">— Select environment —</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Root Path</label>
+            <input type="text" class="form-control" id="ppRootPath" placeholder="/content/site/us/en/about" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Node Pattern <span class="text-muted small">(relative to each match; blank = default for content type)</span></label>
+            <input type="text" class="form-control" id="ppNodePattern" placeholder="jcr:content" value="jcr:content" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Property Name</label>
+            <input type="text" class="form-control" id="ppPropName" placeholder="hideInNav" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Property Value</label>
+            <input type="text" class="form-control" id="ppPropValue" placeholder="true" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Type</label>
+            <select class="form-select" id="ppPropType">
+              <option value="String">String</option>
+              <option value="String[]">String (multi-value)</option>
+              <option value="Boolean">Boolean</option>
+              <option value="Date">Date</option>
+              <option value="Long">Long</option>
+              <option value="Double">Double</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-3 flex-wrap mt-3">
+          <button class="btn btn-primary" id="ppDiscoverBtn" onclick="ppDiscover()">
+            <i class="bi bi-search me-2"></i>Discover
+          </button>
+          <div id="ppDiscoverStats" class="text-muted small"></div>
+        </div>
+
+        <div id="ppDiscoverProgressWrap" class="mt-3" style="display:none">
+          <div class="progress" style="height:6px">
+            <div id="ppDiscoverProgress" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div>
+          </div>
+          <div id="ppDiscoverProgressLabel" class="text-muted small mt-1">Starting...</div>
+        </div>
+
+        <div id="ppAlert" class="mt-3"></div>
+      </div>
+    </div>
+
+    <!-- Pages table -->
+    <div class="card mb-4" id="ppPagesCard" style="display:none">
+      <div class="card-body d-flex align-items-center gap-3 flex-wrap">
+        <button class="btn btn-sm btn-outline-secondary" onclick="ppSelectAll()">Select All</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="ppDeselectAll()">Deselect All</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="ppSelectMissingOnly()" title="Select only items where the node doesn't exist yet">Select Missing Only</button>
+        <input type="text" class="form-control form-control-sm" id="ppPageFilter"
+          placeholder="Filter items..." oninput="ppFilterPagesTable()" style="max-width:260px" />
+        <span id="ppSelectionCount" class="text-muted small">0 items selected</span>
+        <div class="ms-auto">
+          <button class="btn btn-success px-4" onclick="ppRunUpdate()" id="ppRunBtn">
+            <i class="bi bi-play-fill me-1"></i>Run Update
+          </button>
+        </div>
+      </div>
+      <div class="table-responsive pages-table-wrap" style="max-height:420px;overflow-y:auto">
+        <table class="table table-sm table-hover align-middle mb-0" id="ppPagesTable">
+          <thead class="table-dark sticky-top">
+            <tr>
+              <th style="width:40px"><input type="checkbox" id="ppSelectAllChk" onchange="ppToggleAll(this)" /></th>
+              <th>Path</th>
+              <th style="width:110px">Node</th>
+              <th>Current Value</th>
+              <th style="width:90px">Status</th>
+            </tr>
+          </thead>
+          <tbody id="ppPagesBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Update progress -->
+    <div id="ppUpdateProgressSection" style="display:none">
+      <div class="card">
+        <div class="card-header d-flex align-items-center justify-content-between">
+          <strong>Update Progress</strong>
+          <button class="btn btn-sm btn-outline-secondary" onclick="ppExportLog()">
+            <i class="bi bi-download me-1"></i>Export Log
+          </button>
+        </div>
+        <div class="card-body">
+          <div class="d-flex gap-4 mb-3">
+            <div class="text-center">
+              <div class="fs-4 fw-bold text-primary" id="ppStatTotal">0</div>
+              <div class="text-muted small">Total</div>
+            </div>
+            <div class="text-center">
+              <div class="fs-4 fw-bold text-success" id="ppStatDone">0</div>
+              <div class="text-muted small">Done</div>
+            </div>
+            <div class="text-center">
+              <div class="fs-4 fw-bold text-danger" id="ppStatErrors">0</div>
+              <div class="text-muted small">Errors</div>
+            </div>
+          </div>
+          <div class="progress mb-2" style="height:10px">
+            <div id="ppUpdateProgressBar" class="progress-bar" style="width:0%"></div>
+          </div>
+          <div id="ppUpdateProgressLabel" class="text-muted small mb-3"></div>
+
+          <div class="table-responsive" style="max-height:280px;overflow-y:auto">
+            <table class="table table-sm table-hover align-middle">
+              <thead class="table-light sticky-top">
+                <tr>
+                  <th>Path</th>
+                  <th style="width:100px">Status</th>
+                  <th>Message</th>
+                </tr>
+              </thead>
+              <tbody id="ppUpdateLog"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main-content -->
+</div><!-- /#tool-propupdater -->
 
 
 <!-- ══ IMAGE / ASSET TOOL ════════════════════════════════════════════════════ -->
@@ -1437,6 +1602,195 @@
           <i class="bi bi-play-fill me-1"></i>Run Update
         </button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ LIGHTHOUSE AUDIT TOOL ════════════════════════════════════════════════ -->
+<div id="tool-lighthouse" style="display:none">
+  <!-- Two-column layout: sticky settings sidebar + scrollable results pane -->
+  <div style="display:flex;height:calc(100vh - 138px);overflow:hidden">
+
+    <!-- ── Left: compact settings sidebar ─────────────────────────────── -->
+    <aside style="width:290px;flex-shrink:0;border-right:1px solid #dee2e6;overflow-y:auto;background:#f8f9fa;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+
+      <div class="text-uppercase fw-semibold" style="font-size:0.72rem;letter-spacing:.06em;color:#6c757d">
+        <i class="bi bi-speedometer2 me-1"></i>Audit Settings
+      </div>
+
+      <div>
+        <label class="form-label fw-semibold small mb-1" for="lhUrls">URLs <span class="text-muted fw-normal">(one per line)</span></label>
+        <textarea id="lhUrls" class="form-control form-control-sm font-monospace" rows="8" style="resize:vertical"
+          placeholder="https://www.abbvie.com/&#10;https://www.abbvie.gr/&#10;https://www.abbvie.nl/"></textarea>
+      </div>
+
+      <div class="row g-2">
+        <div class="col-6">
+          <div class="fw-semibold small mb-1">Strategy</div>
+          <div class="d-flex flex-column gap-1">
+            <div class="form-check mb-0">
+              <input class="form-check-input" type="radio" name="lhStrategy" id="lhMobile" value="mobile" checked onchange="lhSyncThrottleHint()">
+              <label class="form-check-label small" for="lhMobile"><i class="bi bi-phone me-1"></i>Mobile</label>
+            </div>
+            <div class="form-check mb-0">
+              <input class="form-check-input" type="radio" name="lhStrategy" id="lhDesktop" value="desktop" onchange="lhSyncThrottleHint()">
+              <label class="form-check-label small" for="lhDesktop"><i class="bi bi-display me-1"></i>Desktop</label>
+            </div>
+          </div>
+        </div>
+        <div class="col-6">
+          <label class="fw-semibold small mb-1 d-block" for="lhThrottling">Throttling</label>
+          <select id="lhThrottling" class="form-select form-select-sm">
+            <option value="auto">Auto</option>
+            <option value="simulate">Simulate (PSI)</option>
+            <option value="devtools">DevTools</option>
+          </select>
+          <div id="lhThrottleHint" class="form-text" style="font-size:0.68rem">Mobile → simulate</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="fw-semibold small mb-1">Categories</div>
+        <div class="d-flex flex-wrap gap-2">
+          <div class="form-check mb-0">
+            <input class="form-check-input" type="checkbox" id="lhCatPerf" value="performance" checked>
+            <label class="form-check-label small" for="lhCatPerf">Performance</label>
+          </div>
+          <div class="form-check mb-0">
+            <input class="form-check-input" type="checkbox" id="lhCatSeo" value="seo" checked>
+            <label class="form-check-label small" for="lhCatSeo">SEO</label>
+          </div>
+          <div class="form-check mb-0">
+            <input class="form-check-input" type="checkbox" id="lhCatA11y" value="accessibility" checked>
+            <label class="form-check-label small" for="lhCatA11y">Accessibility</label>
+          </div>
+          <div class="form-check mb-0">
+            <input class="form-check-input" type="checkbox" id="lhCatBp" value="best-practices" checked>
+            <label class="form-check-label small" for="lhCatBp">Best Practices</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-2 align-items-end">
+        <div class="col-7">
+          <label class="fw-semibold small mb-1 d-block" for="lhConcurrency">Parallel tabs</label>
+          <input type="number" id="lhConcurrency" class="form-control form-control-sm" min="1" max="10" value="3">
+          <div class="form-text" style="font-size:0.68rem">Higher = faster, more RAM.</div>
+        </div>
+        <div class="col-5 pb-1">
+          <div class="form-check mb-0">
+            <input class="form-check-input" type="checkbox" id="lhHeadless">
+            <label class="form-check-label small" for="lhHeadless">Headless</label>
+          </div>
+          <div class="form-text" style="font-size:0.68rem">Faster, less accurate</div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary btn-sm w-100" id="lhRunBtn" onclick="runLighthouse()">
+        <i class="bi bi-play-fill me-1"></i>Run Audit
+      </button>
+    </aside>
+
+    <!-- ── Right: results pane ────────────────────────────────────────── -->
+    <div style="flex:1;overflow:hidden;display:flex;flex-direction:column;gap:10px;padding:12px 16px">
+
+      <!-- Progress bar (hidden until audit starts) -->
+      <div id="lhProgress" style="display:none" class="card border-0 shadow-sm flex-shrink-0">
+        <div class="card-body py-2 px-3">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="fw-semibold small">Auditing pages with local Lighthouse…</span>
+            <span class="small text-muted" id="lhProgressText">0 / 0</span>
+          </div>
+          <div class="progress" style="height:6px">
+            <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+              id="lhProgressBar" style="width:0%"></div>
+          </div>
+          <div class="small text-muted mt-1 text-truncate" id="lhProgressCurrent"></div>
+        </div>
+      </div>
+
+      <!-- 4 tier summary cards (compact, single row) -->
+      <div id="lhSummary" style="display:none" class="row g-2 flex-shrink-0">
+        <div class="col-3">
+          <div class="card border-0 shadow-sm text-center py-2 lh-tier-card"
+            style="cursor:pointer;border-left:4px solid #198754 !important" onclick="filterLhTier('excellent')">
+            <div class="fw-bold" style="font-size:1.8rem;color:#198754;line-height:1" id="lhCountExcellent">0</div>
+            <div style="font-size:0.72rem;color:#198754;font-weight:600">&gt; 90</div>
+            <div class="text-muted" style="font-size:0.68rem">Excellent</div>
+          </div>
+        </div>
+        <div class="col-3">
+          <div class="card border-0 shadow-sm text-center py-2 lh-tier-card"
+            style="cursor:pointer;border-left:4px solid #ffc107 !important" onclick="filterLhTier('good')">
+            <div class="fw-bold text-warning" style="font-size:1.8rem;line-height:1" id="lhCountGood">0</div>
+            <div style="font-size:0.72rem;color:#ffc107;font-weight:600">80 – 90</div>
+            <div class="text-muted" style="font-size:0.68rem">Good</div>
+          </div>
+        </div>
+        <div class="col-3">
+          <div class="card border-0 shadow-sm text-center py-2 lh-tier-card"
+            style="cursor:pointer;border-left:4px solid #fd7e14 !important" onclick="filterLhTier('needs')">
+            <div class="fw-bold" style="font-size:1.8rem;color:#fd7e14;line-height:1" id="lhCountNeeds">0</div>
+            <div style="font-size:0.72rem;color:#fd7e14;font-weight:600">60 – 79</div>
+            <div class="text-muted" style="font-size:0.68rem">Needs Work</div>
+          </div>
+        </div>
+        <div class="col-3">
+          <div class="card border-0 shadow-sm text-center py-2 lh-tier-card"
+            style="cursor:pointer;border-left:4px solid #dc3545 !important" onclick="filterLhTier('poor')">
+            <div class="fw-bold text-danger" style="font-size:1.8rem;line-height:1" id="lhCountPoor">0</div>
+            <div style="font-size:0.72rem;color:#dc3545;font-weight:600">&lt; 60</div>
+            <div class="text-muted" style="font-size:0.68rem">Poor</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Results table: expands to fill remaining height -->
+      <div id="lhResults" style="display:none;flex:1;min-height:0;flex-direction:column" class="card border-0 shadow-sm">
+        <div class="card-header flex-shrink-0 py-2">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+            <div class="d-flex flex-wrap gap-1" id="lhTierFilter">
+              <button class="btn btn-sm btn-dark"           data-tier="all"       onclick="filterLhTier('all')">All</button>
+              <button class="btn btn-sm btn-outline-success" data-tier="excellent" onclick="filterLhTier('excellent')">&gt; 90</button>
+              <button class="btn btn-sm btn-outline-warning" data-tier="good"      onclick="filterLhTier('good')">80–90</button>
+              <button class="btn btn-sm btn-outline-secondary" data-tier="needs"   onclick="filterLhTier('needs')" style="color:#fd7e14;border-color:#fd7e14">60–79</button>
+              <button class="btn btn-sm btn-outline-danger"   data-tier="poor"     onclick="filterLhTier('poor')">&lt; 60</button>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" onclick="exportLhCsv()">
+              <i class="bi bi-download me-1"></i>CSV
+            </button>
+          </div>
+          <div class="input-group input-group-sm">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="search" id="lhSearch" class="form-control" placeholder="Search URL…" oninput="lhApplyFilters()">
+          </div>
+        </div>
+        <div style="flex:1;overflow-y:auto;min-height:0">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-dark sticky-top">
+              <tr>
+                <th style="min-width:220px">URL</th>
+                <th class="text-center" style="width:58px">Perf</th>
+                <th class="text-center" style="width:52px">SEO</th>
+                <th class="text-center" style="width:52px">A11y</th>
+                <th class="text-center" style="width:62px">Best Pr.</th>
+                <th class="text-center" style="width:62px">FCP</th>
+                <th class="text-center" style="width:62px">LCP</th>
+                <th class="text-center" style="width:54px">TBT</th>
+                <th class="text-center" style="width:50px">CLS</th>
+              </tr>
+            </thead>
+            <tbody id="lhTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Empty state shown before first audit -->
+      <div id="lhEmpty" style="display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;color:#6c757d;min-height:0">
+        <i class="bi bi-speedometer2" style="font-size:3rem;opacity:0.18"></i>
+        <div class="mt-2 small">Enter URLs on the left and click <strong>Run Audit</strong>.</div>
+      </div>
+
     </div>
   </div>
 </div>

@@ -1,6 +1,14 @@
-const express        = require('express');
-const { randomUUID } = require('crypto');
-const axios          = require('axios');
+const express             = require('express');
+const { randomUUID }      = require('crypto');
+const { spawn }           = require('child_process');
+const axios               = require('axios');
+const chromeLauncher      = require('chrome-launcher');
+// lighthouse v10+ is ESM-only — load once via dynamic import and cache
+let _lighthouse;
+async function getLighthouse() {
+  if (!_lighthouse) ({ default: _lighthouse } = await import('lighthouse'));
+  return _lighthouse;
+}
 const AdmZip  = require('adm-zip');
 const JSZip   = require('jszip');
 const https   = require('https');
@@ -416,14 +424,23 @@ app.post('/api/meta/update/start', async (req, res) => {
       const targetPath = pagePath.replace(appConfig.source.rootPath, appConfig.target.rootPath);
       const params = new URLSearchParams();
 
-      for (const { aem, eds, transform, value, valueType } of mapping) {
+      for (const { aem, eds, transform, value, valueType, typeHint } of mapping) {
         if (!eds) continue;
         if (aem) {
           if (pageProps[aem] !== undefined) {
             const val = applyTransform(transform, pageProps[aem], { damPathMap });
             if (Array.isArray(val)) {
+              // Array value: always multi-value regardless of typeHint
               val.forEach(v => params.append(eds, v));
+              params.append(`${eds}@TypeHint`, typeHint || 'String[]');
+            } else if (typeHint === 'String[]') {
+              // Single string but user forced String[] — AEM serialised a one-element multi-value as plain string
+              params.append(eds, String(val));
               params.append(`${eds}@TypeHint`, 'String[]');
+            } else if (typeHint) {
+              // Any other forced type hint (Boolean, Long, etc.)
+              params.append(eds, String(val));
+              params.append(`${eds}@TypeHint`, typeHint);
             } else {
               params.append(eds, String(val));
             }
@@ -482,6 +499,41 @@ app.get('/api/meta/export/csv', (req, res) => {
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="page-properties.csv"');
   res.send(csv);
+});
+
+// ─── Analyse a single property across all discovered pages ───────────────────
+app.get('/api/meta/analysis/property', (req, res) => {
+  const prop = req.query.prop;
+  if (!prop) return res.status(400).json({ error: 'Missing ?prop= query parameter' });
+  if (!discoveredPages.length) return res.status(400).json({ error: 'No pages discovered yet — run discovery first.' });
+
+  const withProp   = [];
+  const withoutProp = [];
+  const valueCounts = new Map();
+
+  for (const page of discoveredPages) {
+    if (prop in page.properties) {
+      withProp.push(page.path);
+      const val = page.properties[prop];
+      valueCounts.set(val, (valueCounts.get(val) || 0) + 1);
+    } else {
+      withoutProp.push(page.path);
+    }
+  }
+
+  const valueBreakdown = [...valueCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([value, count]) => ({ value, count }));
+
+  res.json({
+    property: prop,
+    totalPages: discoveredPages.length,
+    withProperty: withProp.length,
+    withoutProperty: withoutProp.length,
+    valueBreakdown,
+    pagesWithProperty: withProp,
+    pagesWithoutProperty: withoutProp,
+  });
 });
 
 // ─── Export update log as CSV ─────────────────────────────────────────────────
@@ -2331,6 +2383,348 @@ app.post('/api/pkg-updater/process', express.json({ limit: '1mb' }), async (req,
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LIGHTHOUSE / PAGESPEED INSIGHTS AUDIT
+// ══════════════════════════════════════════════════════════════════════════════
+
+const lhJobs = new Map();
+
+function buildLhFlags(strategy, categories, throttlingMethod, port) {
+  return {
+    logLevel:        'silent',
+    output:          'json',
+    onlyCategories:  categories,
+    port,
+    formFactor:      strategy,
+    throttlingMethod,
+    ...(strategy === 'desktop' ? {
+      screenEmulation: { mobile: false, width: 1350, height: 940, deviceScaleFactor: 1, disabled: false },
+      ...(throttlingMethod === 'devtools' ? {
+        throttling: { rttMs: 40, throughputKbps: 10240, cpuSlowdownMultiplier: 1,
+                      requestLatencyMs: 0, downloadThroughputKbps: 0, uploadThroughputKbps: 0 },
+      } : {}),
+    } : {}),
+  };
+}
+
+function extractLhResult(url, lhr) {
+  const cats = lhr.categories || {};
+  const aud  = lhr.audits     || {};
+  const score = key => {
+    const s = cats[key]?.score;
+    return s !== null && s !== undefined ? Math.round(s * 100) : null;
+  };
+  return {
+    url, status: 'ok',
+    scores: {
+      performance:   score('performance'),
+      seo:           score('seo'),
+      accessibility: score('accessibility'),
+      bestPractices: score('best-practices'),
+    },
+    metrics: {
+      fcp: aud['first-contentful-paint']?.displayValue   || '–',
+      lcp: aud['largest-contentful-paint']?.displayValue || '–',
+      tbt: aud['total-blocking-time']?.displayValue      || '–',
+      cls: aud['cumulative-layout-shift']?.displayValue  || '–',
+      si:  aud['speed-index']?.displayValue              || '–',
+    },
+  };
+}
+
+// Each audit runs in its own child process (lighthouse-worker.js).
+// Root cause for doing this: Node.js perf_hooks.performance is a global singleton.
+// Concurrent Lighthouse calls in the same process call performance.clearMarks() and
+// wipe each other's marks, producing "performance mark has not been set" for every
+// page after the first. A separate process gets its own performance object.
+const WORKER = path.join(__dirname, 'lighthouse-worker.js');
+const AUDIT_TIMEOUT_MS = 120_000; // 2 minutes per page
+
+function auditOne(url, chromeFlags, strategy, categories, throttlingMethod) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [WORKER], {
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+
+    let stdout = '';
+    child.stdout.on('data', d => { stdout += d; });
+
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      resolve({ url, status: 'error', error: `Audit timed out after ${AUDIT_TIMEOUT_MS / 1000}s` });
+    }, AUDIT_TIMEOUT_MS);
+
+    child.on('close', () => {
+      clearTimeout(timer);
+      try {
+        resolve(JSON.parse(stdout));
+      } catch {
+        resolve({ url, status: 'error', error: 'Worker returned invalid output' });
+      }
+    });
+
+    child.on('error', err => {
+      clearTimeout(timer);
+      resolve({ url, status: 'error', error: err.message });
+    });
+
+    child.stdin.write(JSON.stringify({ url, chromeFlags, strategy, categories, throttlingMethod }));
+    child.stdin.end();
+  });
+}
+
+async function runAuditJob(job) {
+  const { urls, strategy, categories, throttlingMethod = 'simulate', concurrency = 3, headless = false } = job;
+
+  const chromeFlags = headless
+    ? ['--headless=new', '--no-sandbox', '--disable-extensions', '--disable-gpu', '--disable-dev-shm-usage']
+    : ['--no-sandbox', '--disable-extensions', '--window-size=1350,940', '--disable-dev-shm-usage'];
+
+  for (let i = 0; i < urls.length; i += concurrency) {
+    const batch = urls.slice(i, i + concurrency).map(u => u.trim()).filter(Boolean);
+    await Promise.all(batch.map(async url => {
+      const result = await auditOne(url, chromeFlags, strategy, categories, throttlingMethod);
+      job.results.push(result);
+      if (result.status === 'error') job.errors++;
+      job.done++;
+    }));
+  }
+
+  job.running = false;
+}
+
+app.post('/api/lighthouse/start', express.json({ limit: '200kb' }), (req, res) => {
+  const {
+    urls,
+    strategy        = 'mobile',
+    categories      = ['performance', 'seo', 'accessibility', 'best-practices'],
+    throttlingMethod = 'devtools',
+    concurrency     = 3,
+    headless        = false,
+  } = req.body;
+
+  if (!Array.isArray(urls) || !urls.length) return res.status(400).json({ error: 'No URLs provided.' });
+
+  const sessionId = randomUUID();
+  const job = { urls, strategy, categories, throttlingMethod, concurrency, headless,
+                results: [], done: 0, total: urls.length, running: true, errors: 0 };
+  lhJobs.set(sessionId, job);
+  setTimeout(() => lhJobs.delete(sessionId), 4 * 60 * 60 * 1000).unref?.();
+
+  runAuditJob(job).catch(err => {
+    job.running = false;
+    job.fatalError = err.message;
+  });
+
+  res.json({ sessionId });
+});
+
+app.get('/api/lighthouse/progress/:sessionId', (req, res) => {
+  const job = lhJobs.get(req.params.sessionId);
+  if (!job) return res.status(404).json({ error: 'Session not found or expired.' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const send = d => res.write(`data: ${JSON.stringify(d)}\n\n`);
+  send({ type: 'total', total: job.total });
+
+  let lastDone = -1;
+  const iv = setInterval(() => {
+    if (job.done !== lastDone || !job.running) {
+      lastDone = job.done;
+      send({ type: 'progress', done: job.done, total: job.total, running: job.running, errors: job.errors, results: job.results });
+    }
+    if (!job.running) { clearInterval(iv); res.end(); }
+  }, 600);
+
+  req.on('close', () => clearInterval(iv));
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROPERTY UPDATER TOOL  (/api/prop-updater/*)
+// Sets one property (on the matched node itself, or a fixed relative node
+// pattern under it, e.g. jcr:content/root/hero) across every cq:Page — or,
+// in asset mode, every dam:Asset — beneath a root path.
+// ══════════════════════════════════════════════════════════════════════════════
+
+let ppDiscovered = [];
+let ppJob        = { running: false, total: 0, done: 0, errors: 0, log: [] };
+let ppClients    = [];
+
+function ppResolveEnvCfg(envName) {
+  const env = loadSiteConfig().environments.find(e => e.name === envName);
+  if (!env) return { error: `Environment "${envName || '(none selected)'}" not found in site.config.json.` };
+  if (!appConfig.target?.username) {
+    return { error: 'No target credentials configured. Set them up in Page Metadata → Configure.' };
+  }
+  return { cfg: { host: env.aemUrl, username: appConfig.target.username, password: appConfig.target.password } };
+}
+
+function ppQueryType(contentType) {
+  return contentType === 'asset' ? 'dam:Asset' : 'cq:Page';
+}
+
+function ppNormalizePattern(nodePattern, contentType) {
+  const trimmed = (nodePattern || '').replace(/^\/+|\/+$/g, '');
+  if (trimmed) return trimmed;
+  return contentType === 'asset' ? 'jcr:content/metadata' : 'jcr:content';
+}
+
+function ppBroadcast() {
+  ppClients.forEach(c => sseWrite(c, ppJob));
+}
+
+app.get('/api/prop-updater/discover', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const { env, rootPath, nodePattern, propertyName, contentType } = req.query;
+  const pattern = ppNormalizePattern(nodePattern, contentType);
+
+  if (!rootPath) {
+    sseWrite(res, { type: 'error', message: 'Root path is required.' });
+    return res.end();
+  }
+  const resolved = ppResolveEnvCfg(env);
+  if (resolved.error) {
+    sseWrite(res, { type: 'error', message: resolved.error });
+    return res.end();
+  }
+
+  try {
+    const client = makeClient(resolved.cfg);
+    sseWrite(res, { type: 'status', message: 'Fetching list from QueryBuilder...' });
+
+    const qbRes = await client.get('/bin/querybuilder.json', {
+      params: {
+        path: rootPath,
+        type: ppQueryType(contentType),
+        'p.limit': -1,
+        'p.hits': 'selective',
+        'p.properties': 'jcr:path'
+      }
+    });
+
+    const paths = (qbRes.data.hits || []).map(h => h['jcr:path']);
+    sseWrite(res, { type: 'total', total: paths.length });
+
+    ppDiscovered = [];
+    let processed = 0;
+    const CONCURRENCY = 10;
+
+    async function checkOne(pagePath) {
+      try {
+        const r = await client.get(`${pagePath}/${pattern}.json`);
+        const raw = propertyName ? r.data[propertyName] : undefined;
+        const currentValue = raw === undefined ? null : normalizeValue(raw);
+        return { path: pagePath, nodeExists: true, currentValue };
+      } catch {
+        return { path: pagePath, nodeExists: false, currentValue: null };
+      }
+    }
+
+    for (let i = 0; i < paths.length; i += CONCURRENCY) {
+      const batch = paths.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(batch.map(checkOne));
+      ppDiscovered.push(...results);
+      processed += results.length;
+      sseWrite(res, { type: 'progress', done: processed, total: paths.length });
+    }
+
+    sseWrite(res, {
+      type: 'complete',
+      total: ppDiscovered.length,
+      nodeExistsCount: ppDiscovered.filter(p => p.nodeExists).length
+    });
+  } catch (err) {
+    sseWrite(res, { type: 'error', message: err.message });
+  }
+
+  res.end();
+});
+
+app.get('/api/prop-updater/pages', (req, res) => {
+  res.json({ pages: ppDiscovered });
+});
+
+app.get('/api/prop-updater/update/progress', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  ppClients.push(res);
+  sseWrite(res, ppJob);
+  req.on('close', () => {
+    ppClients = ppClients.filter(c => c !== res);
+  });
+});
+
+app.post('/api/prop-updater/update/start', async (req, res) => {
+  const { selectedPaths, env, nodePattern, propertyName, propertyValue, valueType, contentType } = req.body;
+
+  if (ppJob.running) return res.status(409).json({ error: 'Update already in progress' });
+  if (!Array.isArray(selectedPaths) || !selectedPaths.length) return res.status(400).json({ error: 'No pages selected.' });
+  if (!propertyName) return res.status(400).json({ error: 'Property name is required.' });
+  if (propertyValue === undefined || propertyValue === '') return res.status(400).json({ error: 'Property value is required.' });
+
+  const resolved = ppResolveEnvCfg(env);
+  if (resolved.error) return res.status(400).json({ error: resolved.error });
+
+  const pattern = ppNormalizePattern(nodePattern, contentType);
+  ppJob = { running: true, total: selectedPaths.length, done: 0, errors: 0, log: [] };
+  res.json({ ok: true, total: selectedPaths.length });
+  ppBroadcast();
+
+  const client = makeClient(resolved.cfg);
+  const CONCURRENCY = 5;
+
+  async function updateOnePage(pagePath) {
+    try {
+      const params = new URLSearchParams();
+      appendConstant(params, propertyName, propertyValue, valueType);
+      await client.post(`${pagePath}/${pattern}`, params.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      });
+      ppJob.log.push({ pagePath, status: 'success' });
+    } catch (err) {
+      ppJob.errors++;
+      const errMsg = err.response?.data
+        ? (typeof err.response.data === 'object' ? JSON.stringify(err.response.data) : err.response.data)
+        : err.message;
+      ppJob.log.push({ pagePath, status: 'error', message: errMsg });
+    } finally {
+      ppJob.done++;
+      ppBroadcast();
+    }
+  }
+
+  (async () => {
+    for (let i = 0; i < selectedPaths.length; i += CONCURRENCY) {
+      await Promise.all(selectedPaths.slice(i, i + CONCURRENCY).map(updateOnePage));
+    }
+    ppJob.running = false;
+    ppBroadcast();
+  })();
+});
+
+app.get('/api/prop-updater/export/log', (req, res) => {
+  if (!ppJob.log.length) return res.status(400).json({ error: 'No update log available' });
+
+  const headers = ['pagePath', 'status', 'message'];
+  const rows = ppJob.log.map(entry =>
+    headers.map(h => `"${String(entry[h] ?? '').replace(/"/g, '""')}"`).join(',')
+  );
+  const csv = [headers.join(','), ...rows].join('\r\n');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename="property-update-log.csv"');
+  res.send(csv);
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
