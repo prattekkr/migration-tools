@@ -1,0 +1,36 @@
+{
+  "org": "abbvie",
+  "contentSourcePattern": "https://{authorHost}/bin/franklin.delivery/{org}/{site}/{branch}",
+  "damInclude": "/content/dam/corporate/",
+  "code": {
+    "owner": "abbvie",
+    "repo": "abbvie-nextgen-eds",
+    "source": {
+      "type": "github",
+      "url": "https://github.com/AbbVie/abbvie-nextgen-eds"
+    }
+  },
+  "content": {
+    "type": "markup",
+    "suffix": ".html"
+  },
+  "access": {
+    "admin": {
+      "role": {
+        "config_admin": [
+          "BA44220C683DCE840A495F84@techacct.adobe.com"
+        ],
+        "admin": [
+          "pratteks@adobe.com",
+          "nitinkuma@adobe.com"
+        ]
+      },
+      "requireAuth": "auto"
+    }
+  },
+  "sidekick": {
+    "project": "AEM XWalk Boilerplate",
+    "editUrlLabel": "AEM Editor",
+    "editUrlPattern": "{{contentSourceUrl}}{{pathname}}?cmd=open"
+  }
+}

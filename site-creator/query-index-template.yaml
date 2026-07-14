@@ -1,0 +1,72 @@
+indices:
+  "{indexName}":
+    target: {target}
+    include:
+      - /**
+    properties:
+      author:
+        value: attribute(el, "content")
+        select: head > meta[name="author"]
+      navtitle:
+        value: attribute(el, "content")
+        select: head > meta[name="navtitle"]
+      description:
+        value: attribute(el, "content")
+        select: head > meta[name="description"]
+      hidefromnavigation:
+        value: attribute(el, "content")
+        select: head > meta[name="hidefromnavigation"]
+      eyebrowtext:
+        value: attribute(el, "content")
+        select: head > meta[name="eyebrowtext"]
+      cardtitle:
+        value: attribute(el, "content")
+        select: head > meta[name="cardtitle"]
+      carddescription:
+        value: attribute(el, "content")
+        select: head > meta[name="carddescription"]
+      cardimage:
+        value: attribute(el, "content")
+        select: head > meta[name="cardimage"]
+      cardimagealt:
+        value: attribute(el, "content")
+        select: head > meta[name="cardimagealt"]
+      ctatext:
+        value: attribute(el, "content")
+        select: head > meta[name="ctatext"]
+      ctaalttext:
+        value: attribute(el, "content")
+        select: head > meta[name="ctaalttext"]
+      storyreadtime:
+        value: attribute(el, "content")
+        select: head > meta[name="storyreadtime"]
+      readwatchtime:
+        value: attribute(el, "content")
+        select: head > meta[name="readwatchtime"]
+      storywatchtime:
+        value: attribute(el, "content")
+        select: head > meta[name="storywatchtime"]
+      publicationdate:
+        value: attribute(el, "content")
+        select: head > meta[name="publicationdate"]
+      cq-tags:
+        value: attribute(el, "content")
+        select: head > meta[name="cq-tags"]
+      navigationalorder:
+        value: attribute(el, "content")
+        select: head> meta[name="navigationalorder"]
+      robots:
+        value: attribute(el, "content")
+        select: head> meta[name="robots"]
+      lastModified:
+        value: parseTimestamp(headers["last-modified"], "ddd, DD MMM YYYY hh:mm:ss GMT")
+        select: none
+      pagevariant:
+        value: attribute(el, "content")
+        selectFirst: meta[name="pagevariant"]
+    exclude:
+      - "**/fragments/**"
+      - "**/drafts/**"
+      - "**/*.json"
+      - "**/language-masters/**"
+      - /content/abbvie-nextgen-eds/corporate/abbvie-com/**

@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="site-creator/styles.css" />
 </head>
 <body>
 
@@ -51,6 +52,11 @@
     <li class="nav-item">
       <button class="nav-link" id="tool-btn-lighthouse" onclick="switchTool('lighthouse')">
         <i class="bi bi-speedometer2 me-1"></i>Lighthouse
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" id="tool-btn-sitecreator" onclick="switchTool('sitecreator')">
+        <i class="bi bi-plus-circle me-1"></i>EDS Site Creator
       </button>
     </li>
     <li class="nav-item">
@@ -1347,15 +1353,18 @@
           <i class="bi bi-arrow-left-right fs-2 text-warning"></i>
           <div>
             <h4 class="mb-0 fw-bold">AEM → EDS Migration Suite</h4>
-            <div class="text-white-50 small">Five tools for migrating AEM content to Edge Delivery Services</div>
+            <div class="text-white-50 small">Eight tools for migrating AEM content to Edge Delivery Services</div>
           </div>
         </div>
         <div class="row g-3 mt-1">
           <div class="col-auto"><span class="badge bg-white text-dark"><i class="bi bi-arrow-repeat me-1"></i>XMOD S7 Package Updater</span></div>
           <div class="col-auto"><span class="badge bg-white text-dark"><i class="bi bi-card-list me-1"></i>Page Metadata</span></div>
+          <div class="col-auto"><span class="badge bg-white text-dark"><i class="bi bi-pencil-square me-1"></i>Property Updater</span></div>
           <div class="col-auto"><span class="badge bg-white text-dark"><i class="bi bi-images me-1"></i>Image / Asset</span></div>
           <div class="col-auto"><span class="badge bg-white text-dark"><i class="bi bi-link-45deg me-1"></i>Link Checker</span></div>
           <div class="col-auto"><span class="badge bg-white text-dark"><i class="bi bi-box-seam me-1"></i>Package Creator</span></div>
+          <div class="col-auto"><span class="badge bg-white text-dark"><i class="bi bi-speedometer2 me-1"></i>Lighthouse</span></div>
+          <div class="col-auto"><span class="badge bg-white text-dark"><i class="bi bi-plus-circle me-1"></i>EDS Site Creator</span></div>
         </div>
       </div>
     </div>
@@ -1563,6 +1572,126 @@
                   <li>Only lines starting with <code>/</code> are treated as paths; everything else is ignored.</li>
                   <li>Self-signed AEM SSL certificates are accepted automatically.</li>
                   <li>The package is created under <code>/etc/packages/{group}</code> using the name and group you provide.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Property Updater ── -->
+      <div class="col-12">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center gap-2" style="background:#f0f9ff;border-left:4px solid #0891b2">
+            <i class="bi bi-pencil-square fs-5" style="color:#0891b2"></i>
+            <strong style="color:#0891b2">Property Updater</strong>
+            <span class="badge bg-secondary ms-2">JCR Bulk Edit</span>
+          </div>
+          <div class="card-body">
+            <p class="text-muted mb-3">
+              Discovers JCR nodes under a root path in AEM and bulk-sets a single property value across
+              hundreds of pages or assets in one pass — without needing to open each page in the AEM UI.
+            </p>
+            <div class="row g-4">
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-list-ol me-2 text-primary"></i>Steps</h6>
+                <ol class="small text-muted ps-3" style="line-height:1.8">
+                  <li><strong>Content Type:</strong> Choose <em>Pages</em> (<code>jcr:content</code>) or <em>Assets</em> (<code>jcr:content/metadata</code>) — determines which node is read and written.</li>
+                  <li><strong>Environment &amp; Root Path:</strong> Select an environment and enter the JCR root path (e.g. <code>/content/abbvie-com/us</code>). Optionally set a node pattern to filter by node name.</li>
+                  <li><strong>Discover:</strong> Click <em>Discover</em> to stream all matching nodes. A table shows each path with its current property value and whether the value is missing.</li>
+                  <li><strong>Select &amp; Filter:</strong> Use <em>Select All</em>, <em>Deselect All</em>, or <em>Select Missing Only</em> to choose which nodes to update. Filter by path using the search box.</li>
+                  <li><strong>Set Property:</strong> Enter the property name, value, and type (<code>String</code>, <code>Boolean</code>, <code>Long</code>, <code>Date</code>). Click <em>Run Update</em>.</li>
+                  <li><strong>Export:</strong> Download a CSV log of every updated node and its result.</li>
+                </ol>
+              </div>
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-lightbulb me-2 text-warning"></i>Notes</h6>
+                <ul class="small text-muted ps-3" style="line-height:1.8">
+                  <li>Discovery uses the AEM QueryBuilder API and streams results via SSE — large trees stream progressively.</li>
+                  <li><em>Select Missing Only</em> selects nodes where the property does not yet exist — ideal for backfilling a new property.</li>
+                  <li>Updates run with configurable concurrency (default 5 parallel requests) to avoid overloading AEM.</li>
+                  <li>The node pattern field supports simple glob-style matching against the node name.</li>
+                  <li>All write operations use the Sling POST servlet (<code>application/x-www-form-urlencoded</code>).</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Lighthouse ── -->
+      <div class="col-12">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center gap-2" style="background:#fffbeb;border-left:4px solid #d97706">
+            <i class="bi bi-speedometer2 fs-5" style="color:#d97706"></i>
+            <strong style="color:#d97706">Lighthouse Auditor</strong>
+            <span class="badge bg-secondary ms-2">Performance · SEO · A11y</span>
+          </div>
+          <div class="card-body">
+            <p class="text-muted mb-3">
+              Runs Google Lighthouse audits against a list of URLs in parallel and presents a searchable,
+              filterable score dashboard — useful for bulk-auditing EDS pages before or after go-live.
+            </p>
+            <div class="row g-4">
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-list-ol me-2 text-primary"></i>Steps</h6>
+                <ol class="small text-muted ps-3" style="line-height:1.8">
+                  <li><strong>URLs:</strong> Paste one URL per line in the text area (supports 1000+ URLs).</li>
+                  <li><strong>Device:</strong> Choose <em>Desktop</em> or <em>Mobile</em> emulation.</li>
+                  <li><strong>Concurrency:</strong> Set how many audits run in parallel (default 3; increase for faster runs on powerful machines).</li>
+                  <li><strong>Run Audit:</strong> Click <em>Run Audit</em>. Progress updates live. Each completed page shows scores for Performance, Accessibility, Best Practices, and SEO.</li>
+                  <li><strong>Review:</strong> Use the score-slab filters (&gt;90 / 80–90 / 60–79 / &lt;60) and the search bar to find underperforming pages. Click any row to see the full Lighthouse report.</li>
+                  <li><strong>Export:</strong> Download a CSV of all scores for further analysis.</li>
+                </ol>
+              </div>
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-lightbulb me-2 text-warning"></i>Notes</h6>
+                <ul class="small text-muted ps-3" style="line-height:1.8">
+                  <li>Each audit runs in a separate child process to avoid Lighthouse's internal performance-mark conflicts when running multiple audits.</li>
+                  <li>Mobile scores differ from desktop by design — Lighthouse simulates a throttled 4G connection and a mid-tier device for mobile.</li>
+                  <li>Score slabs: <span class="badge bg-success">90–100</span> Good &nbsp; <span class="badge bg-warning text-dark">80–89</span> Needs improvement &nbsp; <span class="badge bg-danger">0–79</span> Poor.</li>
+                  <li>Auditing requires Chrome to be installed on the server machine.</li>
+                  <li>Results are kept in memory for the current session — re-running clears previous results.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Site Creator ── -->
+      <div class="col-12">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center gap-2" style="background:#f0fdf4;border-left:4px solid #16a34a">
+            <i class="bi bi-plus-circle fs-5" style="color:#16a34a"></i>
+            <strong style="color:#16a34a">EDS Site Creator</strong>
+            <span class="badge bg-secondary ms-2">EDS Repoless Provisioning</span>
+          </div>
+          <div class="card-body">
+            <p class="text-muted mb-3">
+              Bulk-creates EDS repoless country/language sites across environments — registering each site in
+              the Admin API, creating its query index YAML, and optionally setting up the AEM cloud configuration
+              node and applying <code>cq:conf</code> to the content root.
+            </p>
+            <div class="row g-4">
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-list-ol me-2 text-primary"></i>Steps</h6>
+                <ol class="small text-muted ps-3" style="line-height:1.8">
+                  <li><strong>Sign in:</strong> Click <em>Sign in to admin.hlx.page</em>. A Chrome window opens — complete Adobe SSO. The <code>auth_token</code> cookie is captured and cached for 6 hours.</li>
+                  <li><strong>AEM Credentials:</strong> Enter the AEM author service account username and password for the selected environment. Click <em>Save credentials</em> then <em>Test connection</em> to verify.</li>
+                  <li><strong>Select Environment:</strong> Choose Dev, Test, Stage, or Prod from the dropdown. The author host and branch are shown for confirmation.</li>
+                  <li><strong>Select Sites:</strong> Check the country/language rows you want to create. Use <em>Select all</em>, <em>Select ready</em>, or filter by country/language/path. Click <em>{ }</em> to preview or edit the JSON / YAML / AEM config payloads before sending.</li>
+                  <li><strong>Create:</strong> Click <em>Create selected</em>. The pipeline columns show live status: <strong>S</strong> Site config · <strong>Q</strong> Query index · <strong>C</strong> AEM cloud config · <strong>R</strong> Apply <code>cq:conf</code> to root.</li>
+                </ol>
+              </div>
+              <div class="col-md-6">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-lightbulb me-2 text-warning"></i>Notes</h6>
+                <ul class="small text-muted ps-3" style="line-height:1.8">
+                  <li>The auth token and AEM credentials are encrypted with AES-256-GCM and persisted in <code>site-creator/.auth-cache.json</code> — they survive server restarts.</li>
+                  <li>Payloads are driven by <code>site-creator/environments.json</code>, <code>sites.json</code>, <code>site-defaults.json</code>, and <code>aem-config-defaults.json</code>. Edit these files to add environments or sites.</li>
+                  <li>The <em>{ }</em> button lets you inspect and override the JSON/YAML for a specific site before running — overrides apply only to the current session.</li>
+                  <li>AEM config mode: <em>Create (full subtree)</em> imports the full conf node tree; <em>Update config only</em> patches only <code>jcr:content</code> on an existing node.</li>
+                  <li>Sites that already exist in admin.hlx.page are skipped gracefully (HTTP 409 treated as success).</li>
                 </ul>
               </div>
             </div>
@@ -1795,7 +1924,129 @@
   </div>
 </div>
 
+<!-- ══ SITE CREATOR TOOL ════════════════════════════════════════════════════ -->
+<div id="tool-sitecreator" style="display:none">
+  <div class="sc-main">
+    <!-- Auth + Environment -->
+    <section class="sc-card">
+      <div class="sc-grid-2">
+        <div>
+          <span class="sc-field-label">Authentication <em class="sc-req">*</em></span>
+          <div class="sc-login-row">
+            <button type="button" id="sc-login">Sign in to admin.hlx.page</button>
+            <button type="button" id="sc-view-token" class="sc-ghost sc-hidden">View token</button>
+            <button type="button" id="sc-logout" class="sc-ghost sc-hidden">Sign out</button>
+          </div>
+          <div id="sc-token-status" class="sc-token-status">Checking…</div>
+          <div id="sc-token-reveal" class="sc-token-reveal sc-hidden">
+            <textarea id="sc-token-value" rows="3" readonly spellcheck="false"></textarea>
+            <button type="button" id="sc-copy-token" class="sc-ghost">Copy</button>
+          </div>
+          <small style="color:var(--sc-muted);font-size:12px">Opens Chrome to sign in; the token is cached for 6 hours.</small>
+        </div>
+        <div>
+          <label>
+            <span>Environment <em class="sc-req">*</em></span>
+            <select id="sc-env"></select>
+          </label>
+          <div id="sc-env-info" class="sc-env-info"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- AEM Credentials -->
+    <section class="sc-card">
+      <h2 style="margin:0 0 12px;font-size:15px">AEM authoring credentials — <span id="sc-aem-env-label"></span></h2>
+      <div class="sc-grid-2">
+        <label>
+          <span>Username</span>
+          <input id="sc-aem-user" type="text" autocomplete="off" placeholder="dedicated service user" />
+        </label>
+        <label>
+          <span>Password</span>
+          <input id="sc-aem-pass" type="password" autocomplete="new-password" placeholder="••••••••" />
+        </label>
+      </div>
+      <div class="sc-login-row" style="margin-top:10px">
+        <button type="button" id="sc-aem-save">Save credentials</button>
+        <button type="button" id="sc-aem-test" class="sc-ghost">Test connection</button>
+        <button type="button" id="sc-aem-clear" class="sc-ghost sc-hidden">Clear</button>
+      </div>
+      <div id="sc-aem-status" class="sc-token-status"></div>
+      <small style="color:var(--sc-muted);font-size:12px">Basic auth against <code id="sc-aem-host"></code>. Stored encrypted per environment and kept across restarts until cleared.</small>
+    </section>
+
+    <!-- Site table -->
+    <section class="sc-card">
+      <div class="sc-toolbar">
+        <input id="sc-search" type="text" class="sc-search" placeholder="Filter by country, code or path…" />
+        <div class="sc-toolbar-btns">
+          <button type="button" class="sc-ghost" data-sel="all">Select all</button>
+          <button type="button" class="sc-ghost" data-sel="ready">Select ready</button>
+          <button type="button" class="sc-ghost" data-sel="none">Clear</button>
+        </div>
+      </div>
+      <div class="sc-table-wrap">
+        <table id="sc-sites-table">
+          <thead>
+            <tr>
+              <th class="c-check"><input type="checkbox" id="sc-check-all" title="Select all visible" /></th>
+              <th>Site</th>
+              <th>Country</th>
+              <th>Lang</th>
+              <th class="c-json">Config</th>
+              <th class="c-pipe">Pipeline</th>
+            </tr>
+          </thead>
+          <tbody id="sc-sites-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Actions bar -->
+    <div class="sc-actions sc-sticky">
+      <button type="button" id="sc-create" disabled>Create selected (0)</button>
+      <label class="sc-chk"><input type="checkbox" id="sc-also-index" checked /> Also create query index</label>
+      <label class="sc-chk"><input type="checkbox" id="sc-also-aem" checked /> AEM cloud config</label>
+      <select id="sc-aem-mode" class="sc-inline-select">
+        <option value="create">Create (full subtree)</option>
+        <option value="update">Update config only</option>
+      </select>
+      <span id="sc-progress" class="sc-progress"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Site Creator modal — rendered outside the scoped div so it can be position:fixed -->
+<div id="sc-modal" class="sc-hidden">
+  <div class="sc-modal-box">
+    <div class="sc-modal-head">
+      <h3 id="sc-modal-title">Payload</h3>
+      <button type="button" class="sc-modal-close" id="sc-modal-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-tabs sc-modal-tabs">
+      <button type="button" class="tab active" data-tab="json">Site config (JSON)</button>
+      <button type="button" class="tab" data-tab="yaml">Query index (YAML)</button>
+      <button type="button" class="tab" data-tab="aem">AEM config (JSON)</button>
+    </div>
+    <div class="sc-modal-sub">
+      <div><b id="sc-modal-method">POST</b> <code id="sc-modal-url"></code></div>
+    </div>
+    <textarea id="sc-modal-json" spellcheck="false" rows="20"></textarea>
+    <textarea id="sc-modal-yaml" class="sc-hidden" spellcheck="false" rows="20"></textarea>
+    <textarea id="sc-modal-aem" class="sc-hidden" spellcheck="false" rows="20"></textarea>
+    <div class="sc-modal-msg" id="sc-modal-msg"></div>
+    <div class="sc-modal-actions">
+      <button type="button" class="sc-ghost" id="sc-modal-reset">Reset to default</button>
+      <span class="sc-spacer"></span>
+      <button type="button" class="sc-ghost" id="sc-modal-validate">Validate</button>
+      <button type="button" id="sc-modal-save">Save &amp; use</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="app.js"></script>
+<script src="site-creator/app.js" defer></script>
 </body>
 </html>

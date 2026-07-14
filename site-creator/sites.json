@@ -1,0 +1,474 @@
+{
+  "sites": [
+    {
+      "base": "abbvie-us",
+      "country": "AbbVie Corporate",
+      "folder": "us",
+      "region": "Americas",
+      "language": "English",
+      "lang": "en",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/us/en",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-ca-en",
+      "country": "Canada",
+      "folder": "ca",
+      "region": "Americas",
+      "language": "English",
+      "lang": "en",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ca/en",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-ca-fr",
+      "country": "Canada",
+      "folder": "ca",
+      "region": "Americas",
+      "language": "French",
+      "lang": "fr",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ca/fr",
+      "status": "Will be created after ca/en is migrated."
+    },
+    {
+      "base": "abbvie-pr",
+      "country": "Puerto Rico",
+      "folder": "pr",
+      "region": "Americas",
+      "language": "Spanish (LATAM)",
+      "lang": "es",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/pr/es",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-mx",
+      "country": "Mexico",
+      "folder": "mx",
+      "region": "Americas",
+      "language": "Spanish (LATAM)",
+      "lang": "es",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/mx/es",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-cl",
+      "country": "Chile",
+      "folder": "cl",
+      "region": "LATAM",
+      "language": "Spanish (LATAM)",
+      "lang": "es",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/cl/es",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-co",
+      "country": "Colombia",
+      "folder": "co",
+      "region": "LATAM",
+      "language": "Spanish (LATAM)",
+      "lang": "es",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/co/es",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-ar",
+      "country": "Argentina",
+      "folder": "ar",
+      "region": "LATAM",
+      "language": "Spanish (LATAM)",
+      "lang": "es",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ar/es",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-uy",
+      "country": "Uruguay",
+      "folder": "uy",
+      "region": "LATAM",
+      "language": "Spanish (LATAM)",
+      "lang": "es",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/uy/es",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-br",
+      "country": "Brazil",
+      "folder": "br",
+      "region": "LATAM",
+      "language": "Portuguese",
+      "lang": "pt",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/br/pt",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-uk",
+      "country": "United Kingdom",
+      "folder": "uk",
+      "region": "Europe",
+      "language": "English",
+      "lang": "en",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/uk/en",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-ie",
+      "country": "Ireland",
+      "folder": "ie",
+      "region": "Europe",
+      "language": "English",
+      "lang": "en",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ie/en",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-fr",
+      "country": "France",
+      "folder": "fr",
+      "region": "Europe",
+      "language": "French",
+      "lang": "fr",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/fr/fr",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-de",
+      "country": "Germany",
+      "folder": "de",
+      "region": "Europe",
+      "language": "German",
+      "lang": "de",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/de/de",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-at",
+      "country": "Austria",
+      "folder": "at",
+      "region": "Europe",
+      "language": "German",
+      "lang": "de",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/at/de",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-ch-en",
+      "country": "Switzerland",
+      "folder": "ch",
+      "region": "Europe",
+      "language": "English",
+      "lang": "en",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ch/en",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-ch-de",
+      "country": "Switzerland",
+      "folder": "ch",
+      "region": "Europe",
+      "language": "German",
+      "lang": "de",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ch/de",
+      "status": "Will be created after ch/en is migrated."
+    },
+    {
+      "base": "abbvie-ch-fr",
+      "country": "Switzerland",
+      "folder": "ch",
+      "region": "Europe",
+      "language": "French",
+      "lang": "fr",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ch/fr",
+      "status": "Will be created after ch/en is migrated."
+    },
+    {
+      "base": "abbvie-be-fr",
+      "country": "Belgium",
+      "folder": "be",
+      "region": "Europe",
+      "language": "French",
+      "lang": "fr",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/be/fr",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-be-nl",
+      "country": "Belgium",
+      "folder": "be",
+      "region": "Europe",
+      "language": "Dutch",
+      "lang": "nl",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/be/nl",
+      "status": "will be created after be/fr is migrated."
+    },
+    {
+      "base": "abbvie-nl",
+      "country": "Netherlands",
+      "folder": "nl",
+      "region": "Europe",
+      "language": "Dutch",
+      "lang": "nl",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/nl/nl",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-es",
+      "country": "Spain",
+      "folder": "es",
+      "region": "Europe",
+      "language": "Spanish",
+      "lang": "es",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/es/es",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-pt",
+      "country": "Portugal",
+      "folder": "pt",
+      "region": "Europe",
+      "language": "Portuguese",
+      "lang": "pt",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/pt/pt",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-it",
+      "country": "Italy",
+      "folder": "it",
+      "region": "Europe",
+      "language": "Italian",
+      "lang": "it",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/it/it",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-gr",
+      "country": "Greece",
+      "folder": "gr",
+      "region": "Europe",
+      "language": "Greek",
+      "lang": "el",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/gr/el",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-pl",
+      "country": "Poland",
+      "folder": "pl",
+      "region": "Europe",
+      "language": "Polish",
+      "lang": "pl",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/pl/pl",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-cz",
+      "country": "Czech Republic",
+      "folder": "cz",
+      "region": "Europe",
+      "language": "Czech",
+      "lang": "cs",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/cz/cs",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-sk",
+      "country": "Slovakia",
+      "folder": "sk",
+      "region": "Europe",
+      "language": "Slovak",
+      "lang": "sk",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/sk/sk",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-hu",
+      "country": "Hungary",
+      "folder": "hu",
+      "region": "Europe",
+      "language": "Hungarian",
+      "lang": "hu",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/hu/hu",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-bg",
+      "country": "Bulgaria",
+      "folder": "bg",
+      "region": "Europe",
+      "language": "Bulgarian",
+      "lang": "bg",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/bg/bg",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-ru",
+      "country": "Russia",
+      "folder": "ru",
+      "region": "Europe",
+      "language": "Russian",
+      "lang": "ru",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ru/ru",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-ua",
+      "country": "Ukraine",
+      "folder": "ua",
+      "region": "Europe",
+      "language": "Ukrainian",
+      "lang": "uk",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ua/uk",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-se",
+      "country": "Sweden",
+      "folder": "se",
+      "region": "Europe",
+      "language": "Swedish",
+      "lang": "sv",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/se/sv",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-dk",
+      "country": "Denmark",
+      "folder": "dk",
+      "region": "Europe",
+      "language": "Danish",
+      "lang": "da",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/dk/da",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-no",
+      "country": "Norway",
+      "folder": "no",
+      "region": "Europe",
+      "language": "Norwegian",
+      "lang": "no",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/no/no",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-fi",
+      "country": "Finland",
+      "folder": "fi",
+      "region": "Europe",
+      "language": "Finnish",
+      "lang": "fi",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/fi/fi",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-il",
+      "country": "Israel",
+      "folder": "il",
+      "region": "Middle East",
+      "language": "Hebrew",
+      "lang": "he",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/il/he",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-tr",
+      "country": "Turkey",
+      "folder": "tr",
+      "region": "Middle East",
+      "language": "Turkish",
+      "lang": "tr",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/tr/tr",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-au",
+      "country": "Australia",
+      "folder": "au",
+      "region": "APAC",
+      "language": "English (APAC)",
+      "lang": "en",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/au/en",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-nz",
+      "country": "New Zealand",
+      "folder": "nz",
+      "region": "APAC",
+      "language": "English (APAC)",
+      "lang": "en",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/nz/en",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-in",
+      "country": "India",
+      "folder": "in",
+      "region": "APAC",
+      "language": "English (APAC)",
+      "lang": "en",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/in/en",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-sg",
+      "country": "Singapore",
+      "folder": "sg",
+      "region": "APAC",
+      "language": "English (APAC)",
+      "lang": "en",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/sg/en",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-my",
+      "country": "Malaysia",
+      "folder": "my",
+      "region": "APAC",
+      "language": "English (APAC)",
+      "lang": "en",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/my/en",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-hk",
+      "country": "Hong Kong",
+      "folder": "hk",
+      "region": "APAC",
+      "language": "English (APAC)",
+      "lang": "en",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/hk/en",
+      "status": "Suspended"
+    },
+    {
+      "base": "abbvie-tw",
+      "country": "Taiwan",
+      "folder": "tw",
+      "region": "APAC",
+      "language": "Chinese Trad. (TW)",
+      "lang": "zh-tw",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/tw/zh-tw",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-jp",
+      "country": "Japan",
+      "folder": "jp",
+      "region": "APAC",
+      "language": "Japanese",
+      "lang": "ja",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/jp/ja",
+      "status": "In Sync with master"
+    },
+    {
+      "base": "abbvie-kr",
+      "country": "South Korea",
+      "folder": "kr",
+      "region": "APAC",
+      "language": "Korean",
+      "lang": "ko",
+      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/kr/ko",
+      "status": "In Sync with master"
+    }
+  ]
+}

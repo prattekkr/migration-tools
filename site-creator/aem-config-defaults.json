@@ -1,0 +1,14 @@
+{
+  "_comment": "Constants for the AEM Edge Delivery cloud config node, taken from the real exported package. confRoot + the {site} folder mirror the content tree; 'repo' on the config becomes the full EDS site name. ref/edgeHost/owner/projectType can be overridden per environment in environments.json via aemRef/aemEdgeHost/aemOwner/aemProjectType.",
+  "confRoot": "/conf/abbvie-nextgen-eds/corporate/abbvie-com",
+  "configNodeName": "edge-delivery-service-configuration",
+  "title": "Edge Delivery Service Configuration",
+  "template": "/libs/core/franklin/shell/components/configuration/page/template",
+  "resourceType": "core/franklin/shell/components/configuration/page",
+  "auxiliaryScripts": ["module:scripts/editor-support.js"],
+  "slingConfigPropertyInherit": true,
+  "owner": "abbvie",
+  "projectType": "5",
+  "ref": "develop",
+  "edgeHost": "preview"
+}

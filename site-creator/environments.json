@@ -1,0 +1,41 @@
+{
+  "_comment": "One entry per environment. 'configAdmin' is the per-env technical account for access.admin.role.config_admin. 'aemRef' is the AEM cloud-config 'ref' property (the aem.live branch) and varies per env; edit it here and restart. org, repo and code branch are shared across envs (repoless).",
+  "environments": [
+    {
+      "id": "dev",
+      "label": "Dev",
+      "sitePrefix": "dev",
+      "authorHost": "author-p157365-e1665873.adobeaemcloud.com",
+      "branch": "main",
+      "aemRef": "develop",
+      "configAdmin": ["BA44220C683DCE840A495F84@techacct.adobe.com"]
+    },
+    {
+      "id": "test",
+      "label": "Test",
+      "sitePrefix": "test",
+      "authorHost": "author-p157365-e1665798.adobeaemcloud.com",
+      "branch": "main",
+      "aemRef": "test",
+      "configAdmin": ["REPLACE-test-techacct@techacct.adobe.com"]
+    },
+    {
+      "id": "stage",
+      "label": "Stage",
+      "sitePrefix": "uat",
+      "authorHost": "author-p157365-e1666158.adobeaemcloud.com",
+      "branch": "main",
+      "aemRef": "release",
+      "configAdmin": ["REPLACE-stage-techacct@techacct.adobe.com"]
+    },
+    {
+      "id": "prod",
+      "label": "Prod",
+      "sitePrefix": "prod",
+      "authorHost": "author-p157365-e1666014.adobeaemcloud.com",
+      "branch": "main",
+      "aemRef": "main",
+      "configAdmin": ["REPLACE-prod-techacct@techacct.adobe.com"]
+    }
+  ]
+}
