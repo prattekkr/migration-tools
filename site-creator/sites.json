@@ -2,11 +2,13 @@
   "sites": [
     {
       "base": "abbvie-us",
+      "nameOverride": "abbvie-com",
       "country": "AbbVie Corporate",
       "folder": "us",
       "region": "Americas",
       "language": "English",
       "lang": "en",
+      "domain": "abbvie.com",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/us/en",
       "status": "In Sync with master"
     },
@@ -17,6 +19,7 @@
       "region": "Americas",
       "language": "English",
       "lang": "en",
+      "domain": "abbvie.ca",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ca/en",
       "status": "Suspended"
     },
@@ -27,6 +30,7 @@
       "region": "Americas",
       "language": "French",
       "lang": "fr",
+      "domain": "abbvie.ca",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ca/fr",
       "status": "Will be created after ca/en is migrated."
     },
@@ -37,6 +41,7 @@
       "region": "Americas",
       "language": "Spanish (LATAM)",
       "lang": "es",
+      "domain": "abbvie.pr",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/pr/es",
       "status": "Suspended"
     },
@@ -47,6 +52,7 @@
       "region": "Americas",
       "language": "Spanish (LATAM)",
       "lang": "es",
+      "domain": "abbvie.com.mx",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/mx/es",
       "status": "Suspended"
     },
@@ -57,6 +63,7 @@
       "region": "LATAM",
       "language": "Spanish (LATAM)",
       "lang": "es",
+      "domain": "abbvie.cl",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/cl/es",
       "status": "In Sync with master"
     },
@@ -67,6 +74,7 @@
       "region": "LATAM",
       "language": "Spanish (LATAM)",
       "lang": "es",
+      "domain": "abbvie.com.co",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/co/es",
       "status": "Suspended"
     },
@@ -77,6 +85,7 @@
       "region": "LATAM",
       "language": "Spanish (LATAM)",
       "lang": "es",
+      "domain": "abbvie.com.ar",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ar/es",
       "status": "Suspended"
     },
@@ -87,6 +96,7 @@
       "region": "LATAM",
       "language": "Spanish (LATAM)",
       "lang": "es",
+      "domain": "abbvie.com.uy",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/uy/es",
       "status": "Suspended"
     },
@@ -97,6 +107,7 @@
       "region": "LATAM",
       "language": "Portuguese",
       "lang": "pt",
+      "domain": "abbvie.com.br",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/br/pt",
       "status": "In Sync with master"
     },
@@ -107,6 +118,7 @@
       "region": "Europe",
       "language": "English",
       "lang": "en",
+      "domain": "abbvie.co.uk",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/uk/en",
       "status": "In Sync with master"
     },
@@ -117,6 +129,7 @@
       "region": "Europe",
       "language": "English",
       "lang": "en",
+      "domain": "abbvie.ie",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ie/en",
       "status": "Suspended"
     },
@@ -127,6 +140,7 @@
       "region": "Europe",
       "language": "French",
       "lang": "fr",
+      "domain": "abbvie.fr",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/fr/fr",
       "status": "In Sync with master"
     },
@@ -137,6 +151,7 @@
       "region": "Europe",
       "language": "German",
       "lang": "de",
+      "domain": "abbvie.de",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/de/de",
       "status": "In Sync with master"
     },
@@ -147,6 +162,7 @@
       "region": "Europe",
       "language": "German",
       "lang": "de",
+      "domain": "abbvie.at",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/at/de",
       "status": "Suspended"
     },
@@ -157,6 +173,7 @@
       "region": "Europe",
       "language": "English",
       "lang": "en",
+      "domain": "abbvie.ch",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ch/en",
       "status": "Suspended"
     },
@@ -167,6 +184,7 @@
       "region": "Europe",
       "language": "German",
       "lang": "de",
+      "domain": "abbvie.ch",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ch/de",
       "status": "Will be created after ch/en is migrated."
     },
@@ -177,6 +195,7 @@
       "region": "Europe",
       "language": "French",
       "lang": "fr",
+      "domain": "abbvie.ch",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ch/fr",
       "status": "Will be created after ch/en is migrated."
     },
@@ -187,6 +206,7 @@
       "region": "Europe",
       "language": "French",
       "lang": "fr",
+      "domain": "abbvie.be",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/be/fr",
       "status": "Suspended"
     },
@@ -197,6 +217,7 @@
       "region": "Europe",
       "language": "Dutch",
       "lang": "nl",
+      "domain": "abbvie.be",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/be/nl",
       "status": "will be created after be/fr is migrated."
     },
@@ -207,6 +228,7 @@
       "region": "Europe",
       "language": "Dutch",
       "lang": "nl",
+      "domain": "abbvie.nl",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/nl/nl",
       "status": "In Sync with master"
     },
@@ -217,6 +239,7 @@
       "region": "Europe",
       "language": "Spanish",
       "lang": "es",
+      "domain": "abbvie.es",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/es/es",
       "status": "In Sync with master"
     },
@@ -227,6 +250,7 @@
       "region": "Europe",
       "language": "Portuguese",
       "lang": "pt",
+      "domain": "abbvie.pt",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/pt/pt",
       "status": "Suspended"
     },
@@ -237,6 +261,7 @@
       "region": "Europe",
       "language": "Italian",
       "lang": "it",
+      "domain": "abbvie.it",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/it/it",
       "status": "In Sync with master"
     },
@@ -247,6 +272,7 @@
       "region": "Europe",
       "language": "Greek",
       "lang": "el",
+      "domain": "abbvie.gr",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/gr/el",
       "status": "In Sync with master"
     },
@@ -257,6 +283,7 @@
       "region": "Europe",
       "language": "Polish",
       "lang": "pl",
+      "domain": "abbvie.pl",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/pl/pl",
       "status": "In Sync with master"
     },
@@ -267,6 +294,7 @@
       "region": "Europe",
       "language": "Czech",
       "lang": "cs",
+      "domain": "abbvie.cz",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/cz/cs",
       "status": "In Sync with master"
     },
@@ -277,6 +305,7 @@
       "region": "Europe",
       "language": "Slovak",
       "lang": "sk",
+      "domain": "abbvie.sk",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/sk/sk",
       "status": "In Sync with master"
     },
@@ -287,6 +316,7 @@
       "region": "Europe",
       "language": "Hungarian",
       "lang": "hu",
+      "domain": "abbvie.hu",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/hu/hu",
       "status": "In Sync with master"
     },
@@ -297,6 +327,7 @@
       "region": "Europe",
       "language": "Bulgarian",
       "lang": "bg",
+      "domain": "abbvie.bg",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/bg/bg",
       "status": "In Sync with master"
     },
@@ -307,6 +338,7 @@
       "region": "Europe",
       "language": "Russian",
       "lang": "ru",
+      "domain": "abbvie.ru",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ru/ru",
       "status": "In Sync with master"
     },
@@ -317,6 +349,7 @@
       "region": "Europe",
       "language": "Ukrainian",
       "lang": "uk",
+      "domain": "abbvie.ua",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ua/uk",
       "status": "In Sync with master"
     },
@@ -327,6 +360,7 @@
       "region": "Europe",
       "language": "Swedish",
       "lang": "sv",
+      "domain": "abbvie.se",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/se/sv",
       "status": "In Sync with master"
     },
@@ -337,6 +371,7 @@
       "region": "Europe",
       "language": "Danish",
       "lang": "da",
+      "domain": "abbvie.dk",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/dk/da",
       "status": "In Sync with master"
     },
@@ -347,6 +382,7 @@
       "region": "Europe",
       "language": "Norwegian",
       "lang": "no",
+      "domain": "abbvie.no",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/no/no",
       "status": "In Sync with master"
     },
@@ -357,6 +393,7 @@
       "region": "Europe",
       "language": "Finnish",
       "lang": "fi",
+      "domain": "abbvie.fi",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/fi/fi",
       "status": "In Sync with master"
     },
@@ -367,6 +404,7 @@
       "region": "Middle East",
       "language": "Hebrew",
       "lang": "he",
+      "domain": "abbvie.co.il",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/il/he",
       "status": "In Sync with master"
     },
@@ -377,6 +415,7 @@
       "region": "Middle East",
       "language": "Turkish",
       "lang": "tr",
+      "domain": "abbvie.com.tr",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/tr/tr",
       "status": "In Sync with master"
     },
@@ -387,6 +426,7 @@
       "region": "APAC",
       "language": "English (APAC)",
       "lang": "en",
+      "domain": "abbvie.com.au",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/au/en",
       "status": "Suspended"
     },
@@ -397,6 +437,7 @@
       "region": "APAC",
       "language": "English (APAC)",
       "lang": "en",
+      "domain": "abbvie.co.nz",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/nz/en",
       "status": "Suspended"
     },
@@ -407,6 +448,7 @@
       "region": "APAC",
       "language": "English (APAC)",
       "lang": "en",
+      "domain": "abbvie.in",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/in/en",
       "status": "Suspended"
     },
@@ -417,6 +459,7 @@
       "region": "APAC",
       "language": "English (APAC)",
       "lang": "en",
+      "domain": "abbvie.com.sg",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/sg/en",
       "status": "Suspended"
     },
@@ -427,6 +470,7 @@
       "region": "APAC",
       "language": "English (APAC)",
       "lang": "en",
+      "domain": "abbvie.com.my",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/my/en",
       "status": "Suspended"
     },
@@ -437,6 +481,7 @@
       "region": "APAC",
       "language": "English (APAC)",
       "lang": "en",
+      "domain": "abbvie.com.hk",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/hk/en",
       "status": "Suspended"
     },
@@ -447,6 +492,7 @@
       "region": "APAC",
       "language": "Chinese Trad. (TW)",
       "lang": "zh-tw",
+      "domain": "abbvie.com.tw",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/tw/zh-tw",
       "status": "In Sync with master"
     },
@@ -457,6 +503,7 @@
       "region": "APAC",
       "language": "Japanese",
       "lang": "ja",
+      "domain": "abbvie.co.jp",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/jp/ja",
       "status": "In Sync with master"
     },
@@ -467,6 +514,7 @@
       "region": "APAC",
       "language": "Korean",
       "lang": "ko",
+      "domain": "abbvie.co.kr",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/kr/ko",
       "status": "In Sync with master"
     }

@@ -29,6 +29,7 @@ module.exports = function registerSiteCreatorRoutes(app) {
   let scTokenCache     = { token: null, expiresAt: 0 };
   let scLoginInProgress = false;
   const scAemCreds     = {};
+  let scCfApiToken     = null;
 
   // ── Token helpers ───────────────────────────────────────────────────────────
   const scCachedToken = () =>
@@ -42,7 +43,7 @@ module.exports = function registerSiteCreatorRoutes(app) {
       const iv     = scCrypto.randomBytes(12);
       const cipher = scCrypto.createCipheriv('aes-256-gcm', scCacheKey(), iv);
       const enc    = Buffer.concat([
-        cipher.update(JSON.stringify({ tokenCache: scTokenCache, aemCreds: scAemCreds }), 'utf8'),
+        cipher.update(JSON.stringify({ tokenCache: scTokenCache, aemCreds: scAemCreds, cfApiToken: scCfApiToken }), 'utf8'),
         cipher.final(),
       ]);
       const blob = {
@@ -70,6 +71,7 @@ module.exports = function registerSiteCreatorRoutes(app) {
       for (const [envId, c] of Object.entries(obj.aemCreds || {})) {
         if (c?.user && c?.pass) scAemCreds[envId] = { user: c.user, pass: c.pass };
       }
+      if (obj.cfApiToken) scCfApiToken = obj.cfApiToken;
     } catch (err) {
       console.warn('Could not load auth cache (starting fresh):', err.message);
     }
@@ -114,6 +116,7 @@ module.exports = function registerSiteCreatorRoutes(app) {
   const scLoadDefaults    = () => scReadJson('site-defaults.json');
   const scLoadEnvironments = () => scReadJson('environments.json').environments;
   const scLoadSites        = () => scReadJson('sites.json').sites;
+  const scLoadCdnZones     = () => scReadJson('cdn-zones.json');
   const scLoadIndexTemplate = () => scReadText('query-index-template.yaml');
   const scLoadAemConfigDefaults = () => scReadJson('aem-config-defaults.json');
 
@@ -130,7 +133,7 @@ module.exports = function registerSiteCreatorRoutes(app) {
     if (!env)  throw new Error(`Unknown environment: ${envId}`);
     if (!site) throw new Error(`Unknown site: ${base}`);
 
-    const fullSite   = `${env.sitePrefix}-${site.base}`;
+    const fullSite   = `${env.sitePrefix}-${site.nameOverride || site.base}`;
     const contentUrl = d.contentSourcePattern
       .replace('{authorHost}', env.authorHost)
       .replace('{org}', d.org)
@@ -139,6 +142,15 @@ module.exports = function registerSiteCreatorRoutes(app) {
 
     const cp = site.contentPath.replace(/\/+$/, '');
     const configAdmin = env.configAdmin || d.access.admin.role.config_admin;
+
+    const domain = site.domain;
+    const host = env.hostPattern ? env.hostPattern.replace('{domain}', domain) : null;
+    const cdnZones = scLoadCdnZones();
+    const zoneId = domain ? cdnZones[domain] : null;
+
+    const sidekick = { ...d.sidekick };
+    if (host) sidekick.host = host;
+
     const payload = {
       code: d.code,
       content: { source: { url: contentUrl, type: d.content.type, suffix: d.content.suffix } },
@@ -148,9 +160,17 @@ module.exports = function registerSiteCreatorRoutes(app) {
           requireAuth: d.access.admin.requireAuth,
         },
       },
-      sidekick: d.sidekick,
+      sidekick,
       public: { paths: { mappings: [`${cp}/:/`], includes: [`${cp}/`, d.damInclude] } },
     };
+
+    if (host && zoneId && d.cdn && scCfApiToken) {
+      payload.cdn = {
+        prod: { host, type: d.cdn.type, plan: d.cdn.plan, zoneId, apiToken: scCfApiToken },
+      };
+    }
+
+    if (d.headers) payload.headers = d.headers;
 
     const hasPlaceholder = (v) => (Array.isArray(v) ? v : [v]).some((x) => /^REPLACE-/.test(String(x)));
 
@@ -173,7 +193,7 @@ module.exports = function registerSiteCreatorRoutes(app) {
     if (!env)  throw new Error(`Unknown environment: ${envId}`);
     if (!site) throw new Error(`Unknown site: ${base}`);
 
-    const fullSite  = `${env.sitePrefix}-${site.base}`;
+    const fullSite  = `${env.sitePrefix}-${site.nameOverride || site.base}`;
     const indexName = `${site.country} ${site.language}`.trim();
     const target    = `/query-index-${site.lang}.json`;
     const body      = scLoadIndexTemplate()
@@ -196,7 +216,7 @@ module.exports = function registerSiteCreatorRoutes(app) {
     if (!env)  throw new Error(`Unknown environment: ${envId}`);
     if (!site) throw new Error(`Unknown site: ${base}`);
 
-    const fullSite      = `${env.sitePrefix}-${site.base}`;
+    const fullSite      = `${env.sitePrefix}-${site.nameOverride || site.base}`;
     const confRoot      = d.confRoot;
     const configNodePath = `${confRoot}/${fullSite}/settings/cloudconfigs/${d.configNodeName}`;
 
@@ -366,6 +386,50 @@ module.exports = function registerSiteCreatorRoutes(app) {
     delete scAemCreds[(req.body || {}).envId];
     scSaveAuthCache();
     res.json({ ok: true });
+  });
+
+  app.post('/api/site-creator/cf-token', (req, res) => {
+    const { token } = req.body || {};
+    if (!token || typeof token !== 'string' || !token.trim()) {
+      return res.status(400).json({ ok: false, error: 'Token is required.' });
+    }
+    scCfApiToken = token.trim();
+    scSaveAuthCache();
+    res.json({ ok: true });
+  });
+
+  app.get('/api/site-creator/cf-token-status', (req, res) => {
+    res.json({ saved: !!scCfApiToken });
+  });
+
+  app.post('/api/site-creator/cf-token/clear', (req, res) => {
+    scCfApiToken = null;
+    scSaveAuthCache();
+    res.json({ ok: true });
+  });
+
+  app.get('/api/site-creator/site-status', async (req, res) => {
+    const { envId } = req.query;
+    const token = scCachedToken();
+    if (!token) return res.json({ error: 'not-authenticated' });
+    const env = scEnvById(envId);
+    if (!env) return res.status(400).json({ error: 'Unknown environment.' });
+    const d = scLoadDefaults();
+    const sites = scLoadSites();
+    const result = {};
+    // Sequential with a small gap — avoids connection pool exhaustion on Node.js fetch
+    for (const site of sites) {
+      const fullSite = `${env.sitePrefix}-${site.nameOverride || site.base}`;
+      const url = `${SC_ADMIN_BASE}/config/${d.org}/sites/${fullSite}.json`;
+      try {
+        const r = await fetch(url, { headers: { 'x-auth-token': token } });
+        await r.text(); // consume body so the connection is released
+        result[site.base] = r.ok;
+      } catch {
+        result[site.base] = false;
+      }
+    }
+    res.json(result);
   });
 
   app.post('/api/site-creator/preview-aem-config', (req, res) => {

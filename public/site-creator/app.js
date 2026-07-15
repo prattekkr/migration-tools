@@ -20,6 +20,8 @@
   let hasToken = false;
   let tokenExpiresAt = 0;
   let aemStatus = {};
+  let siteExistence = {};
+  let existenceLoading = false;
 
   const ovKey = (envId, base) => `${envId}::${base}`;
 
@@ -28,7 +30,8 @@
   }
   const isReady = (s) => (s.status || '').trim().toLowerCase() === READY_STATUS;
   const currentEnv = () => CONFIG.environments.find((e) => e.id === $('sc-env').value);
-  const fullName = (base) => `${currentEnv()?.sitePrefix}-${base}`;
+  const getSiteName = (base) => CONFIG.sites.find((s) => s.base === base)?.nameOverride || base;
+  const fullName = (base) => `${currentEnv()?.sitePrefix}-${getSiteName(base)}`;
 
   async function init() {
     CONFIG = await (await fetch('/api/site-creator/config')).json();
@@ -62,8 +65,13 @@
     $('sc-aem-save').addEventListener('click', saveAemCreds);
     $('sc-aem-test').addEventListener('click', testAemCreds);
     $('sc-aem-clear').addEventListener('click', clearAemCreds);
+    $('sc-cf-token-save').addEventListener('click', saveCfToken);
+    $('sc-cf-token-clear').addEventListener('click', clearCfToken);
+    $('sc-existence-refresh').addEventListener('click', refreshSiteExistence);
     refreshTokenStatus();
     refreshAemStatus();
+    refreshCfTokenStatus();
+    refreshSiteExistence();
     setInterval(renderTokenStatus, 30000);
 
     $('sc-modal-close').addEventListener('click', closeModal);
@@ -254,6 +262,94 @@
     $('sc-aem-status').textContent = text;
   }
 
+  // ── Cloudflare API token ──────────────────────────────────────────────────
+  async function refreshCfTokenStatus() {
+    try {
+      const r = await (await fetch('/api/site-creator/cf-token-status')).json();
+      const msg = $('sc-cf-token-status');
+      if (r.saved) {
+        msg.className = 'sc-token-status ok';
+        msg.textContent = '✓ Cloudflare API token saved.';
+        $('sc-cf-token-clear').classList.remove('sc-hidden');
+      } else {
+        msg.className = 'sc-token-status';
+        msg.textContent = 'No token saved — CDN block will be omitted from generated configs.';
+        $('sc-cf-token-clear').classList.add('sc-hidden');
+      }
+    } catch { /* server not ready yet */ }
+  }
+
+  async function saveCfToken() {
+    const token = $('sc-cf-token-input').value.trim();
+    if (!token) { setCfMsg('Enter the Cloudflare API token.', 'err'); return; }
+    try {
+      const r = await (await fetch('/api/site-creator/cf-token', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token }),
+      })).json();
+      if (r.ok) { $('sc-cf-token-input').value = ''; await refreshCfTokenStatus(); }
+      else setCfMsg(`✗ ${r.error}`, 'err');
+    } catch (err) { setCfMsg(`✗ ${err.message}`, 'err'); }
+  }
+
+  async function clearCfToken() {
+    await fetch('/api/site-creator/cf-token/clear', { method: 'POST' }).catch(() => {});
+    await refreshCfTokenStatus();
+  }
+
+  function setCfMsg(text, cls) {
+    $('sc-cf-token-status').className = `sc-token-status ${cls || ''}`;
+    $('sc-cf-token-status').textContent = text;
+  }
+
+  // ── Site existence check ──────────────────────────────────────────────────
+  async function refreshSiteExistence() {
+    const env = currentEnv();
+    if (!env || !hasToken) { siteExistence = {}; applySiteExistence(); return; }
+    existenceLoading = true;
+    updateExistenceBanner('checking');
+    try {
+      const r = await fetch(`/api/site-creator/site-status?envId=${encodeURIComponent(env.id)}`);
+      const data = await r.json();
+      if (data.error) { siteExistence = {}; }
+      else { siteExistence = data; }
+    } catch { siteExistence = {}; }
+    existenceLoading = false;
+    applySiteExistence();
+  }
+
+  function applySiteExistence() {
+    const env = currentEnv();
+    const total = CONFIG.sites.length;
+    const existCount = Object.values(siteExistence).filter(Boolean).length;
+
+    CONFIG.sites.forEach((s) => {
+      const rs = rowState[s.base];
+      if (!rs) return;
+      const exists = !!siteExistence[s.base];
+      rs.tr.classList.toggle('site-exists', exists);
+      const dot = rs.tr.querySelector('.sc-exists-dot');
+      if (dot) {
+        dot.className = `sc-exists-dot ${exists ? 'exists' : ''}`;
+        dot.title = exists ? `Already created on ${env?.label || ''}` : '';
+      }
+    });
+
+    updateExistenceBanner(existenceLoading ? 'checking' : `${existCount}/${total} sites already exist on ${env?.label || ''}`);
+  }
+
+  function updateExistenceBanner(msg) {
+    const el = $('sc-existence-banner');
+    if (!el) return;
+    if (msg === 'checking') {
+      el.innerHTML = '<span class="sc-spinner-sm"></span> Checking site status…';
+      el.className = 'checking';
+    } else {
+      el.textContent = msg;
+      el.className = '';
+    }
+  }
+
   const STEPS = [
     { key: 'site',  label: 'Site',           abbr: 'S' },
     { key: 'index', label: 'Query index',    abbr: 'Q' },
@@ -305,7 +401,7 @@
         tr.dataset.search = `${s.country} ${s.folder} ${s.lang} ${s.language} ${s.contentPath} ${region}`.toLowerCase();
         tr.innerHTML = `
           <td class="c-check"><input type="checkbox" class="row-check" data-base="${escapeHtml(s.base)}" /></td>
-          <td><button type="button" class="sc-expand-caret" aria-label="Details">▸</button><span class="sc-mono sc-site-name"></span></td>
+          <td><button type="button" class="sc-expand-caret" aria-label="Details">▸</button><span class="sc-mono sc-site-name"></span><span class="sc-exists-dot" title=""></span></td>
           <td>${escapeHtml(s.country)} <span class="sc-muted-text">/${escapeHtml(s.folder)}</span></td>
           <td class="sc-mono">${escapeHtml(s.lang)}</td>
           <td class="c-json"><button type="button" class="sc-json-btn sc-ghost" data-base="${escapeHtml(s.base)}">{ }</button></td>
@@ -500,6 +596,9 @@
     refreshEditedMarks();
     updateAemCard();
     updateCount();
+    siteExistence = {};
+    applySiteExistence();
+    refreshSiteExistence();
   }
 
   // ── modal ─────────────────────────────────────────────────────────────────
@@ -671,7 +770,7 @@
     visibleSiteRows().forEach((tr) => {
       const cb = tr.querySelector('.row-check');
       const s = getSite(cb.dataset.base);
-      const val = kind === 'all' ? true : kind === 'none' ? false : isReady(s);
+      const val = kind === 'all' ? true : kind === 'none' ? false : (isReady(s) && !siteExistence[s.base]);
       cb.checked = val;
       rowState[cb.dataset.base].checked = val;
     });
@@ -690,6 +789,17 @@
     btn.textContent = `Create selected (${n})`;
     const env = currentEnv();
     btn.disabled = n === 0 || !hasToken || env?.needsHost || env?.needsConfig;
+
+    const warn = $('sc-selection-warn');
+    if (warn) {
+      const alreadyExist = selectedBases().filter((b) => siteExistence[b]);
+      if (alreadyExist.length) {
+        warn.textContent = `⚠ ${alreadyExist.length} selected site${alreadyExist.length > 1 ? 's are' : ' is'} already created on ${env?.label || ''} and will be overwritten.`;
+        warn.style.display = 'block';
+      } else {
+        warn.style.display = 'none';
+      }
+    }
   }
 
   const errText = (d) => d.error || `${d.status || ''} ${d.statusText || ''}`.trim();
@@ -700,6 +810,15 @@
     const env   = currentEnv();
     const bases = selectedBases();
     if (!bases.length) return;
+
+    const alreadyExist = bases.filter((b) => siteExistence[b]);
+    if (alreadyExist.length) {
+      const names = alreadyExist.map((b) => fullName(b)).join(', ');
+      const confirmed = window.confirm(
+        `The following ${alreadyExist.length === 1 ? 'site is' : 'sites are'} already created on ${env.label} and will be overwritten:\n\n${names}\n\nAre you sure you want to continue?`
+      );
+      if (!confirmed) return;
+    }
 
     const alsoIndex = $('sc-also-index').checked;
     const alsoAem   = $('sc-also-aem').checked;

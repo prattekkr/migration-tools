@@ -1976,6 +1976,18 @@
       <small style="color:var(--sc-muted);font-size:12px">Basic auth against <code id="sc-aem-host"></code>. Stored encrypted per environment and kept across restarts until cleared.</small>
     </section>
 
+    <!-- Cloudflare API Token -->
+    <section class="sc-card">
+      <h2 style="margin:0 0 12px;font-size:15px">Cloudflare API token</h2>
+      <div class="sc-login-row">
+        <input id="sc-cf-token-input" type="password" autocomplete="new-password" placeholder="Cloudflare API token" style="flex:1;min-width:0" />
+        <button type="button" id="sc-cf-token-save">Save token</button>
+        <button type="button" id="sc-cf-token-clear" class="sc-ghost sc-hidden">Clear</button>
+      </div>
+      <div id="sc-cf-token-status" class="sc-token-status"></div>
+      <small style="color:var(--sc-muted);font-size:12px">Used for CDN config generation. Stored encrypted and kept across restarts until cleared. Never written to disk in plaintext.</small>
+    </section>
+
     <!-- Site table -->
     <section class="sc-card">
       <div class="sc-toolbar">
@@ -1985,6 +1997,10 @@
           <button type="button" class="sc-ghost" data-sel="ready">Select ready</button>
           <button type="button" class="sc-ghost" data-sel="none">Clear</button>
         </div>
+      </div>
+      <div class="sc-existence-banner">
+        <span id="sc-existence-banner"></span>
+        <button type="button" id="sc-existence-refresh" class="sc-ghost" style="font-size:11px;padding:2px 8px;margin-left:8px">↻ Refresh</button>
       </div>
       <div class="sc-table-wrap">
         <table id="sc-sites-table">
@@ -2002,6 +2018,9 @@
         </table>
       </div>
     </section>
+
+    <!-- Already-created selection warning -->
+    <div id="sc-selection-warn" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:8px 12px;font-size:13px;color:#92400e;margin-bottom:8px"></div>
 
     <!-- Actions bar -->
     <div class="sc-actions sc-sticky">
