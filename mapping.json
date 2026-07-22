@@ -1,10 +1,5 @@
 [
   {
-    "aem": "cq:tags",
-    "eds": "cq:tags",
-    "transform": "aem-tag-to-eds"
-  },
-  {
     "aem": "ctaAltText",
     "eds": "ctaAltText"
   },
@@ -51,24 +46,12 @@
     "eds": "pageTitle"
   },
   {
-    "aem": "readTime",
-    "eds": "storyReadTime"
-  },
-  {
-    "aem": "readWatchTimeSel",
-    "eds": "readWatchTime"
-  },
-  {
-    "aem": "subtitle",
-    "eds": "pageSubtitle"
-  },
-  {
     "aem": "title",
     "eds": "cardTitle"
   },
   {
     "eds": "pageVariant",
-    "value": "storyPage",
+    "value": "otherPage",
     "valueType": "String"
   }
 ]

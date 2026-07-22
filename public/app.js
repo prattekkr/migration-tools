@@ -1230,761 +1230,222 @@ async function imageInit() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// LINK CHECKER TOOL
+// MIGRATION QA — LINK CHECKER TOOL
 // ══════════════════════════════════════════════════════════════════════════════
 
-// ─── State ────────────────────────────────────────────────────────────────────
-let lcData              = null;   // { stats, files } from last check
-let lcTypeFilter        = 'all';  // active type filter
-let lcFile              = null;   // selected File object
-let lcSiteRoots         = [];     // configured site roots (persisted in localStorage)
-let lcSiteRootsExpanded = true;   // collapsed state for site root config card
+let lcFile = null, lcSessionId = null, lcAnalysis = null;
 
-const LC_ROOTS_KEY = 'lc-site-roots';
+const LC_CHECKS = [
+  { key: 'shortPath', label: 'Short paths',          icon: 'bi-signpost-split',   desc: 'Relative page links not rooted at the site root' },
+  { key: 'absolute',  label: 'Absolute URLs',        icon: 'bi-globe',            desc: 'Internal pages written as full http(s) URLs' },
+  { key: 'pdf',       label: 'PDFs not on DM',       icon: 'bi-file-earmark-pdf', desc: 'PDF assets still on /content/dam' },
+  { key: 'dam',       label: 'DAM assets not on DM', icon: 'bi-images',           desc: 'Images / assets still on /content/dam' },
+  { key: 'scene7',    label: 'Absolute Scene7 URLs', icon: 'bi-link-45deg',       desc: 'Legacy scene7.com delivery URLs' },
+];
 
-const LC_TYPE_LABELS = {
-  dam:            { label: 'DAM',          cls: 'lc-badge-dam'       },
-  internal:       { label: 'Internal',     cls: 'lc-badge-internal'  },
-  external:       { label: 'External',     cls: 'lc-badge-external'  },
-  'scene7':       { label: 'Scene7',         cls: 'lc-badge-scene7'     },
-  'dm-openapi':   { label: 'DM Open API',   cls: 'lc-badge-dmopenapi'  },
-  'aem-cloud':    { label: 'AEM Cloud',     cls: 'lc-badge-aemcloud'   },
-  'abbvie-abs':   { label: 'AbbVie (Abs)',  cls: 'lc-badge-abbvieabs'  },
-  'short-path':   { label: 'Short Path',   cls: 'lc-badge-shortpath'  },
-  other:          { label: 'Other',        cls: 'lc-badge-other'     },
-};
-
-// ─── Site root configuration ──────────────────────────────────────────────────
-function lcLoadSiteRoots() {
-  try { lcSiteRoots = JSON.parse(localStorage.getItem(LC_ROOTS_KEY) || '[]'); } catch { lcSiteRoots = []; }
-  lcRenderSiteRoots();
+async function lcInit() {
+  try {
+    const data  = await (await fetch('/api/image/csv-status')).json();
+    const built = (data.statuses || []).filter(s => s.exists);
+    const sel   = document.getElementById('lcEnv');
+    if (sel) sel.innerHTML = '<option value="">— select —</option>' +
+      built.map(s => `<option value="${escHtml(s.name)}">${escHtml(s.name)}</option>`).join('');
+  } catch { /* no envs */ }
 }
 
-function lcSaveSiteRoots() {
-  localStorage.setItem(LC_ROOTS_KEY, JSON.stringify(lcSiteRoots));
-}
-
-function lcRenderSiteRoots() {
-  const list = document.getElementById('lcSiteRootList');
-  if (!lcSiteRoots.length) {
-    list.innerHTML = '<p class="text-muted small mb-0">No site roots configured.</p>';
-    return;
-  }
-  list.innerHTML = lcSiteRoots.map((root, i) => `
-    <div class="d-flex align-items-center gap-2 mb-1">
-      <code class="small">${escHtml(root)}</code>
-      <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="lcRemoveSiteRoot(${i})" title="Remove">
-        <i class="bi bi-x"></i>
-      </button>
-    </div>`).join('');
-}
-
-function lcAddSiteRoot() {
-  const input = document.getElementById('lcSiteRootInput');
-  const root  = input.value.trim();
-  if (!root) return;
-  if (!root.startsWith('/')) { alert('Site root must start with /'); return; }
-  if (lcSiteRoots.includes(root)) { input.value = ''; return; }
-  lcSiteRoots.push(root);
-  lcSaveSiteRoots();
-  lcRenderSiteRoots();
-  input.value = '';
-}
-
-function lcRemoveSiteRoot(i) {
-  lcSiteRoots.splice(i, 1);
-  lcSaveSiteRoots();
-  lcRenderSiteRoots();
-}
-
-function lcToggleSiteRoots() {
-  lcSiteRootsExpanded = !lcSiteRootsExpanded;
-  document.getElementById('lcSiteRootBody').style.display    = lcSiteRootsExpanded ? 'block' : 'none';
-  document.getElementById('lcSiteRootChevron').style.transform = lcSiteRootsExpanded ? '' : 'rotate(180deg)';
-}
-
-// ─── File selection ───────────────────────────────────────────────────────────
 function lcOnFileSelected(input) {
   const file = input.files[0];
   if (!file) return;
-  lcFile = file;
-
+  lcFile = file; lcSessionId = null; lcAnalysis = null;
   document.getElementById('lcUploadZone').classList.add('lc-has-file');
   document.getElementById('lcUploadTitle').textContent = file.name;
   document.getElementById('lcUploadSub').textContent   = `${(file.size / 1024 / 1024).toFixed(2)} MB — click to change`;
-  document.getElementById('lcCheckBtn').disabled = false;
+  document.getElementById('lcScanBtn').disabled = false;
+  document.getElementById('lcResetBtn').style.display = '';
   document.getElementById('lcStatus').textContent = '';
+  document.getElementById('lcReport').style.display = 'none';
 }
 
 function lcReset() {
-  lcFile       = null;
-  lcData       = null;
-  lcTypeFilter = 'all';
-
-  document.getElementById('lcZipInput').value  = '';
+  lcFile = null; lcSessionId = null; lcAnalysis = null;
+  document.getElementById('lcZipInput').value = '';
   document.getElementById('lcUploadZone').classList.remove('lc-has-file');
-  document.getElementById('lcUploadTitle').textContent = 'Click to browse for ZIP file';
-  document.getElementById('lcUploadSub').textContent   = 'Select an AEM package ZIP (nested or flat)';
-  document.getElementById('lcCheckBtn').disabled = true;
+  document.getElementById('lcUploadTitle').textContent = 'Click to browse for a content-package ZIP';
+  document.getElementById('lcUploadSub').textContent   = 'AEM package ZIP (nested or flat)';
+  document.getElementById('lcScanBtn').disabled = true;
   document.getElementById('lcResetBtn').style.display = 'none';
+  document.getElementById('lcReport').style.display = 'none';
   document.getElementById('lcStatus').textContent = '';
-  document.getElementById('lcResults').style.display = 'none';
-  document.getElementById('lcFixCard').style.display = 'none';
 }
 
-// ─── Run check ────────────────────────────────────────────────────────────────
-async function lcCheck() {
-  if (!lcFile) return;
-
-  const btn = document.getElementById('lcCheckBtn');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Scanning...';
-  document.getElementById('lcStatus').textContent = '';
-  document.getElementById('lcResults').style.display = 'none';
-
-  const formData = new FormData();
-  formData.append('zip', lcFile);
-
-  try {
-    const res  = await fetch('/api/link-checker/check', { method: 'POST', body: formData });
-    const data = await res.json();
-
-    if (!data.success) throw new Error(data.error || 'Unknown error');
-
-    lcData = data;
-    lcTypeFilter = 'all';
-    lcRenderStats(data.stats);
-    lcRenderTable();
-    await lcDetectRoot();
-    lcRenderFixPanel(data.stats);
-    lcRenderPdfPanel();
-    lcRenderIssuesSummary(data.stats);
-    lcLoadEnvs();
-    document.getElementById('lcResults').style.display = 'block';
-    document.getElementById('lcResetBtn').style.display = '';
-    document.getElementById('lcStatus').textContent =
-      `${data.stats.totalFiles} files · ${data.stats.totalLinks.toLocaleString()} links found`;
-  } catch (err) {
-    document.getElementById('lcStatus').textContent = `Error: ${err.message}`;
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-search me-2"></i>Check Links';
-  }
+// Upload once → create a server-side session. Returns sessionId.
+async function lcEnsureSession() {
+  if (lcSessionId) return lcSessionId;
+  const fd = new FormData(); fd.append('zip', lcFile);
+  const res = await (await fetch('/api/link-checker/check', { method: 'POST', body: fd })).json();
+  if (!res.success) throw new Error(res.error || 'Upload failed');
+  lcSessionId = res.sessionId;
+  return lcSessionId;
 }
 
-// ─── Stats cards ──────────────────────────────────────────────────────────────
-function lcRenderStats(stats) {
-  const shortCount  = stats.byType['short-path']  || 0;
-  const abbvieCount = stats.byType['abbvie-abs']  || 0;
-
-  // Unique PDF references across the package (matches the PDF Links panel count) —
-  // excludes files the conversion skips (META-INF/redirects/config) so the count
-  // reflects only conversion-eligible PDFs.
-  const pdfSet = new Set();
-  (lcData?.files || []).forEach(f => {
-    if (lcIsSkippedFile(f.file)) return;
-    (f.links || []).forEach(l => { if (/\.pdf(?:[?#]|$)/i.test(l.url)) pdfSet.add(l.url); });
-  });
-  const pdfCount = pdfSet.size;
-
-  const cards = [
-    { label: 'Files with Links',   value: stats.totalFiles,          color: 'text-primary'                                        },
-    { label: 'Total Links',        value: stats.totalLinks,          color: 'text-dark'                                           },
-    { label: 'DAM Assets',         value: stats.byType.dam,          color: 'text-info'                                           },
-    { label: 'Internal Pages',     value: stats.byType.internal,     color: 'text-success'                                        },
-    { label: 'External',           value: stats.byType.external,     color: 'text-warning'                                        },
-    { label: 'Scene7 (Classic)',    value: stats.byType['scene7']     || 0, color: 'text-danger'    },
-    { label: 'DM Open API',        value: stats.byType['dm-openapi'] || 0, color: 'text-purple'   },
-    { label: 'PDFs',               value: pdfCount,                  color: 'text-danger'                                         },
-    { label: 'AEM Cloud',          value: stats.byType['aem-cloud'], color: 'text-secondary'                                      },
-    { label: 'AbbVie Abs URLs ⚠', value: abbvieCount,               color: abbvieCount > 0 ? 'text-danger fw-bold' : 'text-muted' },
-    { label: 'Short Paths ⚠',     value: shortCount,                color: shortCount  > 0 ? 'text-danger fw-bold' : 'text-muted' },
-  ];
-
-  document.getElementById('lcStatCards').innerHTML = cards.map(c => `
-    <div class="col-auto">
-      <div class="card lc-stat-card">
-        <div class="card-body text-center py-3 px-4">
-          <div class="fs-3 fw-bold ${c.color}">${Number(c.value).toLocaleString()}</div>
-          <div class="text-muted" style="font-size:0.75rem">${c.label}</div>
-        </div>
-      </div>
-    </div>`).join('');
-}
-
-// ─── Guided summary: scan line + issue chips (the hero) ───────────────────────
-function lcRenderIssuesSummary(stats) {
-  const scan = document.getElementById('lcScanLine');
-  if (scan) scan.textContent = `Scanned ${stats.totalFiles} file(s) · ${stats.totalLinks.toLocaleString()} link(s).`;
-
-  // Eligible PDF count (excludes files the conversion skips)
-  const pdfSet = new Set();
-  (lcData?.files || []).forEach(f => {
-    if (lcIsSkippedFile(f.file)) return;
-    (f.links || []).forEach(l => { if (lcIsPdfUrl(l.url)) pdfSet.add(l.url); });
-  });
-
-  const issues = [
-    { type: 'short-path', label: 'Short Paths',   count: stats.byType['short-path'] || 0, cls: 'warning' },
-    { type: 'abbvie-abs', label: 'AbbVie URLs',   count: stats.byType['abbvie-abs'] || 0, cls: 'danger'  },
-    { type: 'scene7',     label: 'Scene7',        count: stats.byType['scene7']     || 0, cls: 'danger'  },
-    { type: 'pdf',        label: 'PDFs',          count: pdfSet.size,                     cls: 'danger'  },
-  ].filter(i => i.count > 0);
-
-  const box = document.getElementById('lcIssueChips');
-  if (!box) return;
-  if (!issues.length) {
-    box.innerHTML = '<span class="badge bg-success-subtle text-success border border-success"><i class="bi bi-check-circle me-1"></i>No fixable issues detected</span>';
-    return;
-  }
-  box.innerHTML = '<span class="small text-muted me-1 align-self-center">Issues found:</span>' +
-    issues.map(i => `
-      <button type="button" class="btn btn-sm btn-outline-${i.cls}" onclick="lcJumpToFilter('${i.type}')" title="Show these in the link table">
-        ${escHtml(i.label)} <span class="badge bg-${i.cls} ms-1">${i.count.toLocaleString()}</span>
-      </button>`).join('');
-}
-
-// Clicking an issue chip: open Details and filter the table to that type
-function lcJumpToFilter(type) {
-  const body = document.getElementById('lcDetailsBody');
-  if (body && !body.classList.contains('show') && window.bootstrap) {
-    bootstrap.Collapse.getOrCreateInstance(body).show();
-  }
-  lcSetTypeFilter(type);
-  document.getElementById('lcTable')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-// ─── Single Target environment dropdown (drives Scene7 / PDF / validation) ────
-async function lcLoadEnvs() {
-  const sel = document.getElementById('lcEnv');
-  if (!sel) return;
-  const current = sel.value;
-  try {
-    const res  = await fetch('/api/image/csv-status');
-    const data = await res.json();
-    const built = (data.statuses || []).filter(s => s.exists);
-    sel.innerHTML = '<option value="">— select —</option>' +
-      built.map(s => `<option value="${escHtml(s.name)}">${escHtml(s.name)}</option>`).join('');
-    if (current) sel.value = current;
-  } catch {
-    sel.innerHTML = '<option value="">— none available —</option>';
-  }
-}
-
-// ─── Table rendering ──────────────────────────────────────────────────────────
-function lcRenderTable() {
-  const search = document.getElementById('lcSearch').value.toLowerCase();
-  const tbody  = document.getElementById('lcTableBody');
-  tbody.innerHTML = '';
-
-  let visibleCount = 0;
-
-  (lcData?.files || []).forEach((f, idx) => {
-    // Type filter: skip files with no links of the filtered type. 'pdf' is
-    // cross-cutting (any link ending in .pdf), not a classifyLink type.
-    if (lcTypeFilter === 'pdf') {
-      // conversion-eligible PDFs only — skip META-INF/redirects/config files
-      if (lcIsSkippedFile(f.file) || !f.links.some(l => lcIsPdfUrl(l.url))) return;
-    } else if (lcTypeFilter !== 'all' && !(f.counts[lcTypeFilter] > 0)) {
-      return;
-    }
-
-    // Search filter on file path OR any link URL
-    if (search) {
-      const fileMatch = f.file.toLowerCase().includes(search);
-      const linkMatch = f.links.some(l => l.url.toLowerCase().includes(search));
-      if (!fileMatch && !linkMatch) return;
-    }
-
-    visibleCount++;
-
-    const rowId = `lc-row-${idx}`;
-    const detailId = `lc-detail-${idx}`;
-
-    // Count cells — highlight the active filter type; always warn on short-path counts
-    const countCells = ['dam','internal','external','scene7','dm-openapi','aem-cloud','abbvie-abs','short-path'].map(t => {
-      const cnt = f.counts[t] || 0;
-      const warn = t === 'short-path' || t === 'abbvie-abs';
-      let hl;
-      if (lcTypeFilter === t && cnt > 0)   hl = ' fw-bold text-primary';
-      else if (warn && cnt > 0)            hl = ' fw-bold text-warning';
-      else if (cnt > 0)                    hl = '';
-      else                                 hl = ' text-muted';
-      return `<td class="text-center${hl}">${cnt || '—'}</td>`;
-    }).join('');
-
-    tbody.insertAdjacentHTML('beforeend', `
-      <tr id="${rowId}" class="lc-file-row" onclick="lcToggleDetail(${idx})" style="cursor:pointer">
-        <td class="text-center">
-          <i class="bi bi-chevron-right lc-chevron" id="lc-chev-${idx}" style="font-size:0.75rem;color:#6c757d;transition:transform 0.15s"></i>
-        </td>
-        <td class="small font-monospace lc-file-path" title="${escHtml(f.file)}">${escHtml(f.file)}</td>
-        <td class="text-center fw-semibold">${f.linkCount}</td>
-        ${countCells}
-      </tr>
-      <tr id="${detailId}" style="display:none">
-        <td colspan="11" class="p-0">
-          <div class="lc-detail-panel" id="lc-panel-${idx}"></div>
-        </td>
-      </tr>`);
-  });
-
-  document.getElementById('lcNoResults').style.display = visibleCount === 0 ? 'block' : 'none';
-  document.getElementById('lcTable').style.display     = visibleCount === 0 ? 'none'  : '';
-}
-
-// ─── Expand / collapse detail ─────────────────────────────────────────────────
-function lcToggleDetail(idx) {
-  const detailRow = document.getElementById(`lc-detail-${idx}`);
-  const chevron   = document.getElementById(`lc-chev-${idx}`);
-  const panel     = document.getElementById(`lc-panel-${idx}`);
-  const isOpen    = detailRow.style.display !== 'none';
-
-  if (isOpen) {
-    detailRow.style.display = 'none';
-    chevron.style.transform = '';
-  } else {
-    detailRow.style.display = '';
-    chevron.style.transform = 'rotate(90deg)';
-    if (!panel.dataset.built) {
-      panel.dataset.built = '1';
-      lcBuildDetailPanel(panel, lcData.files[idx]);
-    }
-  }
-}
-
-function lcBuildDetailPanel(panel, f) {
-  const search = document.getElementById('lcSearch').value.toLowerCase();
-
-  const links = lcTypeFilter === 'all'
-    ? f.links
-    : lcTypeFilter === 'pdf'
-      ? f.links.filter(l => lcIsPdfUrl(l.url))
-      : f.links.filter(l => l.type === lcTypeFilter);
-
-  const filtered = search
-    ? links.filter(l => l.url.toLowerCase().includes(search))
-    : links;
-
-  if (!filtered.length) {
-    panel.innerHTML = '<div class="p-3 text-muted small">No links match current filter.</div>';
-    return;
-  }
-
-  const hasShortPaths  = filtered.some(l => l.type === 'short-path' || l.type === 'abbvie-abs');
-  const showSuggestions = hasShortPaths && lcSiteRoots.length > 0;
-
-  panel.innerHTML = `
-    <table class="table table-sm mb-0 lc-link-table">
-      <thead><tr>
-        <th style="width:110px">Type</th>
-        <th>URL / Path</th>
-        ${showSuggestions ? '<th>Suggested Full Path</th>' : ''}
-      </tr></thead>
-      <tbody>
-        ${filtered.map(l => {
-          const isShort    = l.type === 'short-path' || l.type === 'abbvie-abs';
-          const suggestion = isShort && lcSiteRoots.length > 0
-            ? lcSiteRoots.map(r => `<span class="d-block">${escHtml(r + l.url)}</span>`).join('')
-            : '';
-          return `<tr${isShort ? ' class="table-warning"' : ''}>
-            <td><span class="badge ${LC_TYPE_LABELS[l.type]?.cls || 'bg-secondary'}">${LC_TYPE_LABELS[l.type]?.label || l.type}</span></td>
-            <td class="small font-monospace lc-link-url" title="${escHtml(l.url)}">${escHtml(l.url)}</td>
-            ${showSuggestions ? `<td class="small font-monospace text-success">${suggestion}</td>` : ''}
-          </tr>`;
-        }).join('')}
-      </tbody>
-    </table>`;
-}
-
-// ─── Fix short paths ──────────────────────────────────────────────────────────
-// ── Detect site root from the uploaded ZIP ────────────────────────────────────
 async function lcDetectRoot() {
-  const sessionId = lcData?.sessionId;
-  if (!sessionId) return;
+  if (!lcFile) { alert('Upload a ZIP first.'); return; }
+  const btn = document.getElementById('lcDetectBtn'); btn.disabled = true;
   try {
-    const res = await fetch('/api/link-checker/detect-root', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId }),
+    await lcEnsureSession();
+    const info = await (await fetch('/api/link-checker/detect-root', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: lcSessionId }),
+    })).json();
+    if (info.siteRoot) document.getElementById('lcSiteRoot').value = info.siteRoot;
+    document.getElementById('lcStatus').textContent = info.siteRoot
+      ? `Detected root: ${info.siteRoot}` : 'Could not detect a root — enter it manually.';
+  } catch (e) { document.getElementById('lcStatus').textContent = e.message; }
+  finally { btn.disabled = false; }
+}
+
+async function lcScan() {
+  if (!lcFile) return;
+  const siteRoot = document.getElementById('lcSiteRoot').value.trim();
+  if (!siteRoot.startsWith('/content/')) { alert('Enter a valid site root starting with /content/'); return; }
+  const env = document.getElementById('lcEnv').value;
+  const btn = document.getElementById('lcScanBtn'); btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Scanning...';
+  try {
+    await lcEnsureSession();
+    const res  = await fetch('/api/link-checker/analyze', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env }),
     });
-    const { siteRoot, locales } = await res.json();
-    document.getElementById('lcDetectedRoot').textContent   = siteRoot || '(not detected)';
-    document.getElementById('lcDetectedLocales').textContent = locales?.join(' · ') || '—';
-    const override = document.getElementById('lcRootOverride');
-    if (override) override.placeholder = siteRoot || '/content/site/root';
-  } catch {
-    document.getElementById('lcDetectedRoot').textContent = '(error detecting root)';
-  }
-}
-
-function lcToggleRootOverride() {
-  const wrap = document.getElementById('lcRootOverrideWrap');
-  if (wrap) wrap.style.display = wrap.style.display === 'none' ? '' : 'none';
-}
-
-function lcGetEffectiveSiteRoot() {
-  const override = document.getElementById('lcRootOverride')?.value.trim();
-  if (override) return override;
-  return document.getElementById('lcDetectedRoot')?.textContent.trim() || '';
-}
-
-// ── Render fix panel based on issue counts ────────────────────────────────────
-async function lcRenderFixPanel(stats) {
-  const shortCount  = stats.byType['short-path']  || 0;
-  const scene7Count = stats.byType['scene7']       || 0;
-  const absCount    = stats.byType['abbvie-abs']   || 0;
-  const hasIssues   = shortCount > 0 || scene7Count > 0 || absCount > 0;
-
-  const card = document.getElementById('lcFixCard');
-  // Always show card so DAM normalization is accessible even if no other issues detected
-  card.style.display = 'block';
-
-  // Short paths section
-  const spSec = document.getElementById('lcFixSection-shortPath');
-  if (spSec) {
-    spSec.style.display = shortCount > 0 ? '' : 'none';
-    const badge = document.getElementById('lcFixCount-shortPath');
-    if (badge) badge.textContent = shortCount;
-  }
-
-  // Scene7 section
-  const s7Sec = document.getElementById('lcFixSection-scene7');
-  if (s7Sec) {
-    s7Sec.style.display = scene7Count > 0 ? '' : 'none';
-    const badge = document.getElementById('lcFixCount-scene7');
-    if (badge) badge.textContent = scene7Count;
-  }
-
-  // AbbVie abs section
-  const absSec = document.getElementById('lcFixSection-abbvieAbs');
-  if (absSec) {
-    absSec.style.display = absCount > 0 ? '' : 'none';
-    const badge = document.getElementById('lcFixCount-abbvieAbs');
-    if (badge) badge.textContent = absCount;
-  }
-
-  // Defaults-first: pre-select all detected fixes (values already have sensible defaults).
-  // Validation stays off (needs credentials).
-  ['lcFix-check-shortPath', 'lcFix-check-scene7', 'lcFix-check-absBaseUrl', 'lcFix-check-damPaths', 'lcFix-check-pdf']
-    .forEach(id => { const el = document.getElementById(id); if (el) el.checked = true; });
-
-  document.getElementById('lcFixStatus').textContent = '';
-}
-
-function lcToggleValidate() {
-  const on = document.getElementById('lcFix-check-validate')?.checked;
-  const fields = document.getElementById('lcValidateFields');
-  if (fields) fields.style.display = on ? '' : 'none';
-}
-
-// Populate the validation environment dropdown from site.config
-async function lcLoadValidateEnvs() {
-  const sel = document.getElementById('lcFix-validate-env');
-  if (!sel) return;
-  try {
-    const res  = await fetch('/api/image/site-config');
     const data = await res.json();
-    const envs = (data.environments || []).filter(e => e.aemUrl);
-    sel.innerHTML = '<option value="">— select —</option>' +
-      envs.map(e => `<option value="${escHtml(e.name)}">${escHtml(e.name)} (${escHtml(e.aemUrl.replace(/^https?:\/\//, ''))})</option>`).join('');
-  } catch {
-    sel.innerHTML = '<option value="">— could not load environments —</option>';
-  }
+    if (!res.ok) throw new Error(data.error || 'Scan failed');
+    lcAnalysis = data;
+    lcRenderReport(data);
+  } catch (e) { alert(e.message); }
+  finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-search me-2"></i>Scan'; }
 }
 
-// Populate the Scene7 CSV environment dropdown from the Image/Asset tool's csv-status
-// Mirror server.js envSlug() so the dropdown value matches asset-map-{slug}.csv
-function lcEnvSlug(name) {
-  return (name || 'default').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+function lcExamples(examples) {
+  if (!examples || !examples.length) return '';
+  return `<ul class="small text-muted mt-2 mb-0" style="max-height:180px;overflow:auto">` +
+    examples.map(e => `<li><code>${escHtml(e.url)}</code> <span class="text-secondary">— ${escHtml(e.file)}</span></li>`).join('') +
+    `</ul>`;
 }
 
-async function lcLoadScene7Envs() {
-  const sel = document.getElementById('lcFix-scene7-env');
-  if (!sel) return;
+function lcCheckCard(c, count, examples) {
+  const pass   = count === 0;
+  const border = pass ? '#198754' : '#dc3545';
+  const fixBtn = pass ? '' :
+    `<button class="btn btn-sm btn-outline-success" onclick="lcFix(['${c.key}'])"><i class="bi bi-magic me-1"></i>Fix</button>`;
+  return `
+  <div class="card mb-2" style="border-left:4px solid ${border}">
+    <div class="card-body py-2">
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <i class="bi ${c.icon} ${pass ? 'text-success' : 'text-danger'}"></i>
+        <strong>${escHtml(c.label)}</strong>
+        <span class="badge ${pass ? 'bg-success' : 'bg-danger'}">${pass ? 'PASS' : count}</span>
+        <span class="text-muted small">— ${escHtml(c.desc)}</span>
+        <div class="ms-auto">${fixBtn}</div>
+      </div>
+      ${lcExamples(examples)}
+    </div>
+  </div>`;
+}
+
+function lcRenderReport(data) {
+  document.getElementById('lcSummary').innerHTML =
+    `Scanned <strong>${data.pagesScanned}</strong> Franklin page(s) of ${data.xmlTotal} XML file(s). Site root <code>${escHtml(data.siteRoot)}</code>.` +
+    (data.env
+      ? ` Env <strong>${escHtml(data.env)}</strong>${data.csvExists ? '' : ' <span class="text-danger">(no CSV!)</span>'}.`
+      : ' <span class="text-warning">No env selected — PDF/DAM/Scene7 fixes disabled.</span>');
+
+  document.getElementById('lcChecks').innerHTML = [
+    lcCheckCard(LC_CHECKS[0], data.checks.shortPath.count, data.checks.shortPath.examples),
+    '<div id="lcAbsSlot"></div>',   // Absolute URLs card — filled by lcRenderAbsolute() (reacts to domain toggles)
+    lcCheckCard(LC_CHECKS[2], data.checks.pdf.count, data.checks.pdf.examples),
+    lcCheckCard(LC_CHECKS[3], data.checks.dam.count, data.checks.dam.examples),
+    lcCheckCard(LC_CHECKS[4], data.checks.scene7.count, data.checks.scene7.examples),
+  ].join('');
+
+  const dc = document.getElementById('lcDomainCard');
+  if (data.domains.length) {
+    dc.style.display = '';
+    document.getElementById('lcDomains').innerHTML = data.domains.map((d, i) => `
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="lcDom${i}" data-host="${escHtml(d.host)}" ${d.guessInternal ? '' : 'checked'} onchange="lcRenderAbsolute()" />
+        <label class="form-check-label" for="lcDom${i}">
+          <code>${escHtml(d.host)}</code>
+          <span class="text-muted small">— ${d.count} link(s) on ${d.files} page(s)</span>
+          ${d.guessInternal
+            ? '<span class="badge bg-danger-subtle text-danger ms-1">internal?</span>'
+            : '<span class="badge bg-secondary-subtle text-secondary ms-1">external?</span>'}
+        </label>
+      </div>`).join('') +
+      `<div class="form-text mt-1">Checked = external (left as-is). Unchecked = internal (domain stripped, re-rooted to the site root).</div>`;
+  } else dc.style.display = 'none';
+
+  const cc = document.getElementById('lcCrossCard');
+  if (data.crossLocale.count) {
+    cc.style.display = '';
+    document.getElementById('lcCrossCount').textContent = data.crossLocale.count;
+    document.getElementById('lcCrossList').innerHTML = lcExamples(data.crossLocale.examples) || '<span class="text-muted small">—</span>';
+  } else cc.style.display = 'none';
+
+  lcRenderAbsolute();
+  document.getElementById('lcReport').style.display = '';
+}
+
+// internalDomains = the domains NOT ticked as external
+function lcInternalDomains() {
+  return [...document.querySelectorAll('#lcDomains input[type=checkbox]')]
+    .filter(cb => !cb.checked).map(cb => cb.dataset.host);
+}
+
+// Re-render the Absolute URLs card to show only links on currently-internal domains
+// (i.e. domains NOT ticked as external). Runs on load and on every domain toggle.
+function lcRenderAbsolute() {
+  const slot = document.getElementById('lcAbsSlot');
+  if (!slot || !lcAnalysis) return;
+  const internal = new Set(lcInternalDomains().map(h => h.toLowerCase()));
+  const hostOf = u => { const m = u.match(/^https?:\/\/([^/]+)/i); return m ? m[1].toLowerCase() : ''; };
+  const shown = (lcAnalysis.checks.absolute.examples || []).filter(e => internal.has(hostOf(e.url)));
+  slot.innerHTML = lcCheckCard(LC_CHECKS[1], shown.length, shown);
+}
+
+// checks = array of check keys to fix, or null for all
+async function lcFix(checks) {
+  if (!lcSessionId) { alert('Scan first.'); return; }
+  const siteRoot = document.getElementById('lcSiteRoot').value.trim();
+  const env      = document.getElementById('lcEnv').value;
+  const status   = document.getElementById('lcFixStatus');
+  status.className = 'small mt-2 text-muted'; status.textContent = 'Fixing…';
   try {
-    const res  = await fetch('/api/image/csv-status');
-    const data = await res.json();
-    // response shape: { statuses: [{ name, exists, ... }, ...] }
-    const statuses  = data.statuses || data || [];
-    const available = statuses.filter(e => e.exists);
-    if (!available.length) {
-      sel.innerHTML = '<option value="">— no CSV available — build one in Image/Asset tool —</option>';
-      return;
-    }
-    sel.innerHTML = '<option value="">— select environment —</option>' +
-      available.map(e => `<option value="${escHtml(lcEnvSlug(e.name))}">${escHtml(e.name)}</option>`).join('');
-  } catch {
-    sel.innerHTML = '<option value="">— could not load environments —</option>';
-  }
-}
-
-// ── Fix all issues and download patched ZIP ────────────────────────────────────
-async function lcFixIssues() {
-  const sessionId = lcData?.sessionId;
-  if (!sessionId) { alert('No active session — please re-upload the ZIP.'); return; }
-
-  const siteRoot = lcGetEffectiveSiteRoot();
-  const env = document.getElementById('lcEnv')?.value || '';   // single Target environment
-
-  const fixes = { siteRoot };
-
-  const needsEnv = ['lcFix-check-scene7', 'lcFix-check-pdf', 'lcFix-check-validate']
-    .some(id => document.getElementById(id)?.checked);
-  if (needsEnv && !env) {
-    const s = document.getElementById('lcFixStatus');
-    s.textContent = 'Select a Target environment above (needed for Scene7 / PDF / validation) — or uncheck those in Details.';
-    s.className = 'small text-danger fw-semibold';
-    document.getElementById('lcEnv')?.focus();
-    return;
-  }
-
-  if (document.getElementById('lcFix-check-shortPath')?.checked) {
-    fixes.shortPath = true;
-  }
-  if (document.getElementById('lcFix-check-scene7')?.checked) {
-    fixes.scene7 = { csvEnv: lcEnvSlug(env) };
-  }
-  if (document.getElementById('lcFix-check-absBaseUrl')?.checked) {
-    const baseDomain = document.getElementById('lcFix-absBaseUrl-domain')?.value.trim() || 'abbvie.com';
-    fixes.absBaseUrl = { baseDomain };
-  }
-  if (document.getElementById('lcFix-check-damPaths')?.checked) {
-    const correctRoot = document.getElementById('lcFix-dam-correct')?.value.trim();
-    const oldStr      = document.getElementById('lcFix-dam-old')?.value.trim();
-    const oldRoots    = oldStr ? oldStr.split(',').map(s => s.trim()).filter(Boolean) : [];
-    if (correctRoot && oldRoots.length) {
-      fixes.damPaths = { correctRoot, oldRoots };
-    }
-  }
-  if (document.getElementById('lcFix-check-pdf')?.checked) {
-    fixes.pdfToDm = { env };
-  }
-  if (document.getElementById('lcFix-check-validate')?.checked) {
-    fixes.validate = {
-      env,
-      username: document.getElementById('lcFix-validate-user')?.value || '',
-      password: document.getElementById('lcFix-validate-pass')?.value || '',
-    };
-  }
-
-  const btn = document.getElementById('lcFixAllBtn');
-  btn.disabled = true;
-  btn.innerHTML = fixes.validate
-    ? '<span class="spinner-border spinner-border-sm me-2"></span>Processing &amp; validating…'
-    : '<span class="spinner-border spinner-border-sm me-2"></span>Processing…';
-  const status = document.getElementById('lcFixStatus');
-  status.textContent = '';
-  status.className = 'small text-muted';
-
-  try {
-    const res = await fetch('/api/link-checker/fix-issues', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, fixes }),
+    const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains() };
+    if (checks) body.checks = checks;
+    const res = await fetch('/api/link-checker/fix', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || res.statusText);
-    }
-
-    const fixedCount      = res.headers.get('X-Fixed-Count')      || '0';
-    const unmatchedScene7 = res.headers.get('X-Unmatched-Scene7') || '0';
-    const changeCount     = res.headers.get('X-Change-Count')     || '0';
-    const headChecked     = res.headers.get('X-Head-Checked')     || '0';
-    const head404         = res.headers.get('X-Head-404')         || '0';
-    const headErrors      = res.headers.get('X-Head-Errors')      || '0';
-    const reportId        = res.headers.get('X-Report-Id')        || '';
-
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Fix failed'); }
+    const pages = res.headers.get('X-Pages-Fixed');
+    const changes = res.headers.get('X-Change-Count');
+    const unmatched = res.headers.get('X-Unmatched');
+    const reportId = res.headers.get('X-Report-Id');
     const blob = await res.blob();
     const url  = URL.createObjectURL(blob);
-    const a    = Object.assign(document.createElement('a'), { href: url, download: 'fixed-package.zip' });
-    a.click();
+    const a = document.createElement('a'); a.href = url; a.download = 'qa-fixed-package.zip'; a.click();
     URL.revokeObjectURL(url);
-
-    let msg = `Done — ${fixedCount} file(s) patched, ${changeCount} URL(s) rewritten. ZIP download started.`;
-    if (parseInt(unmatchedScene7, 10) > 0) {
-      msg += ` ${unmatchedScene7} Scene7 URL(s) had no CSV match and were left unchanged.`;
+    status.className = 'small mt-2 text-success';
+    status.textContent = `✓ Fixed ${changes} reference(s) across ${pages} page(s)${unmatched > 0 ? `, ${unmatched} unmatched (no CSV entry)` : ''}. ZIP downloaded.`;
+    if (reportId) {
+      document.getElementById('lcDownloadRow').style.display = '';
+      document.getElementById('lcReportLink').href = '/api/link-checker/fix-report/' + reportId;
     }
-    if (parseInt(headChecked, 10) > 0) {
-      msg += ` Validated ${headChecked} URL(s): ${head404} returned 404`;
-      msg += parseInt(headErrors, 10) > 0 ? `, ${headErrors} errored.` : '.';
-      msg += ' Filter the report by head_status to review.';
-    }
-    status.innerHTML = `${escHtml(msg)}` + (reportId
-      ? ` <a href="/api/link-checker/fix-report/${encodeURIComponent(reportId)}" download="fix-change-report.csv" class="ms-1"><i class="bi bi-filetype-csv me-1"></i>Download change report (old → new URLs)</a>`
-      : '');
-    status.className = 'small text-success fw-semibold';
-
-    // Session is consumed — reset so user knows to re-upload for another run
-    lcData = { ...lcData, sessionId: null };
-  } catch (err) {
-    status.textContent = `Error: ${err.message}`;
-    status.className = 'small text-danger';
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-download me-2"></i>Fix All &amp; Download ZIP';
-  }
+    // Re-scan to refresh counts — the session buffer now holds the fixed result.
+    await lcScan();
+  } catch (e) { status.className = 'small mt-2 text-danger'; status.textContent = e.message; }
 }
 
-// ─── PDF links panel ────────────────────────────────────────────────────────
-let lcPdfRows = [];
-
-function lcRenderPdfPanel() {
-  const card = document.getElementById('lcPdfCard');
-  if (!card) return;
-  const map = new Map();   // url → { url, type, count } — conversion-eligible files only
-  (lcData?.files || []).forEach(f => {
-    if (lcIsSkippedFile(f.file)) return;   // META-INF / redirects / config are never converted
-    (f.links || []).forEach(l => {
-      if (!lcIsPdfUrl(l.url)) return;
-      const e = map.get(l.url) || { url: l.url, type: l.type, count: 0 };
-      e.count++;
-      map.set(l.url, e);
-    });
-  });
-  lcPdfRows = [...map.values()].sort((a, b) => b.count - a.count);
-  document.getElementById('lcPdfCount').textContent = lcPdfRows.length;
-  if (!lcPdfRows.length) { card.style.display = 'none'; return; }
-  card.style.display = 'block';
-  document.getElementById('lcPdfFilter').value = '';
-  document.getElementById('lcPdfStatus').textContent = '';
-  lcRenderPdfList(lcPdfRows);
-}
-
-function lcRenderPdfList(rows) {
-  const cls = t => t === 'dam' ? 'lc-badge-dam' : t === 'abbvie-abs' ? 'lc-badge-abbvieabs' : t === 'internal' ? 'lc-badge-internal' : 'lc-badge-external';
-  const ref = r => r.dmUrl
-    ? `<a href="${escHtml(r.dmUrl)}" target="_blank" rel="noopener" title="Open PDF (DM Open API)">${escHtml(r.url)} <i class="bi bi-box-arrow-up-right"></i></a>`
-    : (r.dmUrl === '' && r.resolved ? `${escHtml(r.url)} <span class="text-muted">(no DM URL)</span>` : escHtml(r.url));
-  document.getElementById('lcPdfList').innerHTML = rows.length
-    ? rows.map(r => `
-      <tr>
-        <td class="small font-monospace" style="word-break:break-all">${ref(r)}</td>
-        <td class="text-center">${r.count}</td>
-        <td><span class="badge ${cls(r.type)}">${escHtml(r.type)}</span></td>
-      </tr>`).join('')
-    : '<tr><td colspan="3" class="text-muted small text-center py-3">No PDF references match.</td></tr>';
-}
-
-function lcFilterPdfList() {
-  const q = document.getElementById('lcPdfFilter').value.toLowerCase();
-  lcRenderPdfList(q ? lcPdfRows.filter(r => r.url.toLowerCase().includes(q)) : lcPdfRows);
-}
-
-async function lcLoadPdfEnvs() {
-  const sel = document.getElementById('lcPdfEnv');
-  if (!sel) return;
-  try {
-    const res  = await fetch('/api/image/csv-status');
-    const data = await res.json();
-    const built = (data.statuses || []).filter(s => s.exists);
-    sel.innerHTML = '<option value="">— select —</option>' +
-      built.map(s => `<option value="${escHtml(s.name)}">${escHtml(s.name)}</option>`).join('');
-  } catch {
-    sel.innerHTML = '<option value="">— none —</option>';
-  }
-}
-
-// Resolve each listed PDF to its DM Open API URL so the reference becomes a
-// clickable link you can open/preview. Does not modify the package.
-async function lcViewPdfs() {
-  const status = document.getElementById('lcPdfStatus');
-  const env = document.getElementById('lcEnv')?.value || '';
-  if (!env) { status.className = 'small text-danger fw-semibold'; status.textContent = 'Select a Target environment at the top first.'; return; }
-
-  const btn  = document.getElementById('lcPdfViewBtn');
-  const orig = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Resolving…';
-  status.textContent = ''; status.className = 'small text-muted';
-
-  try {
-    const res = await fetch('/api/link-checker/pdf-dm-urls', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ env, paths: lcPdfRows.map(r => r.url) }),
-    });
-    if (!res.ok) {
-      const e = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(e.error || res.statusText);
-    }
-    const { resolved } = await res.json();
-    let viewable = 0;
-    lcPdfRows.forEach((r, i) => { r.dmUrl = resolved[i] || ''; r.resolved = true; if (r.dmUrl) viewable++; });
-    lcFilterPdfList();   // re-render (respecting any active filter)
-    status.className = 'small text-success fw-semibold';
-    status.textContent = `${viewable} of ${lcPdfRows.length} PDF(s) now viewable — click a reference to open it. ${lcPdfRows.length - viewable} have no DM URL (not in CSV / not approved).`;
-  } catch (err) {
-    status.textContent = 'Error: ' + err.message;
-    status.className = 'small text-danger fw-semibold';
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = orig;
-  }
-}
-
-// ─── Type filter ──────────────────────────────────────────────────────────────
-// Cross-cutting PDF test — any link ending in .pdf (ignoring query/fragment)
-function lcIsPdfUrl(u) { return /\.pdf(?:[?#]|$)/i.test(u); }
-
-// Mirror of the server's lcIsSkipped — files the fixers/PDF conversion never touch
-// (META-INF tree, redirects.xml/filter.xml, redirects node, config node). Used so the
-// PDF list/count only reflect PDFs that are actually eligible for conversion.
-function lcIsSkippedFile(name) {
-  const segs = String(name).split('/');
-  const base = segs[segs.length - 1];
-  if (segs.includes('META-INF')) return true;
-  if (base === 'redirects.xml' || base === 'filter.xml') return true;
-  if (segs.includes('redirects')) return true;
-  if (segs.includes('config')) return true;
-  return false;
-}
-
-function lcSetTypeFilter(type) {
-  lcTypeFilter = type;
-
-  // Keep the warning/danger accent colors for the flagged pills (pdf, abbvie-abs, short-path)
-  const accent = { 'abbvie-abs': 'danger', 'short-path': 'warning', 'pdf': 'danger' };
-  document.querySelectorAll('.lc-type-btn').forEach(btn => {
-    const t = btn.dataset.type;
-    const isActive = t === type;
-    const c = accent[t] || 'secondary';
-    btn.className = `btn btn-sm lc-type-btn ${isActive ? 'btn-' + (accent[t] || 'primary') : 'btn-outline-' + c}`;
-  });
-
-  lcRenderTable();
-}
-
-// ─── Search ───────────────────────────────────────────────────────────────────
-function lcApplyFilters() { lcRenderTable(); }
-
-// ─── Export CSV ───────────────────────────────────────────────────────────────
-async function lcExportCsv() {
-  if (!lcData) return;
-
-  const files = lcTypeFilter === 'all'
-    ? lcData.files
-    : lcData.files.map(f => ({
-        ...f,
-        links: f.links.filter(l => l.type === lcTypeFilter)
-      })).filter(f => f.links.length > 0);
-
-  const res  = await fetch('/api/link-checker/export-csv', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ files }),
-  });
-
-  const blob = await res.blob();
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = 'link-report.csv';
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
+document.addEventListener('DOMContentLoaded', lcInit);
 // ══════════════════════════════════════════════════════════════════════════════
 // PACKAGE CREATOR TOOL
 // ══════════════════════════════════════════════════════════════════════════════

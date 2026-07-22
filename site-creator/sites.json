@@ -167,37 +167,15 @@
       "status": "Suspended"
     },
     {
-      "base": "abbvie-ch-en",
+      "base": "abbvie-ch",
       "country": "Switzerland",
       "folder": "ch",
       "region": "Europe",
       "language": "English",
-      "lang": "en",
-      "domain": "abbvie.ch",
-      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ch/en",
-      "status": "Suspended"
-    },
-    {
-      "base": "abbvie-ch-de",
-      "country": "Switzerland",
-      "folder": "ch",
-      "region": "Europe",
-      "language": "German",
       "lang": "de",
       "domain": "abbvie.ch",
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ch/de",
-      "status": "Will be created after ch/en is migrated."
-    },
-    {
-      "base": "abbvie-ch-fr",
-      "country": "Switzerland",
-      "folder": "ch",
-      "region": "Europe",
-      "language": "French",
-      "lang": "fr",
-      "domain": "abbvie.ch",
-      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/ch/fr",
-      "status": "Will be created after ch/en is migrated."
+      "status": "Suspended"
     },
     {
       "base": "abbvie-be-fr",
