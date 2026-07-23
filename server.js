@@ -563,6 +563,31 @@ const envSlug  = name => (name || 'default').toLowerCase().replace(/\s+/g, '-').
 const csvPath  = envName => path.join(DATA_DIR,   `asset-map-${envSlug(envName)}.csv`);
 const configPath = envName => path.join(DATA_DIR, `config-${envSlug(envName)}.json`);
 
+// Previous-build reference CSVs live in data-old/ (same per-env filename). A fresh
+// crawl can lose dam:scene7Name/dam:scene7File on reprocessed assets, so build-csv
+// backfills those two columns from here for assets that match by path.
+const DATA_OLD_DIR = path.join(__dirname, 'data-old');
+const oldCsvPath   = envName => path.join(DATA_OLD_DIR, `asset-map-${envSlug(envName)}.csv`);
+
+// Build a path → { scene7Name, scene7File } map from the env's data-old CSV.
+// Returns null if the reference file is missing or unreadable.
+function loadOldScene7Map(envName) {
+  const file = oldCsvPath(envName);
+  if (!fs.existsSync(file)) return null;
+  try {
+    const oldRows = parse(fs.readFileSync(file, 'utf8'), { columns: true, skip_empty_lines: true });
+    const map = new Map();
+    for (const r of oldRows) {
+      if (r.path && (r.scene7Name || r.scene7File)) {
+        map.set(r.path, { scene7Name: r.scene7Name || '', scene7File: r.scene7File || '' });
+      }
+    }
+    return map;
+  } catch {
+    return null;
+  }
+}
+
 function loadSiteConfig() {
   try {
     if (fs.existsSync(SITE_CONFIG_PATH)) {
@@ -617,11 +642,14 @@ app.get('/api/image/csv-status', (req, res) => {
 
 // ── Build CSV ─────────────────────────────────────────────────────────────────
 app.post('/api/image/build-csv', async (req, res) => {
-  const { aemUrl, username, password, damRoot, dmHost, envName } = req.body;
+  const { aemUrl, username, password, damRoot, dmHost, envName, verifyScene7, s7Host, s7Root,
+          recoverFromSource, s7SourceHost, s7SourceUser, s7SourcePass } = req.body;
 
   if (!aemUrl || !username || !password || !damRoot || !dmHost) {
     return res.json({ success: false, error: 'All fields are required.' });
   }
+
+  const doVerify = verifyScene7 !== false;   // on by default; send verifyScene7:false to skip
 
   const ENV_CSV_PATH    = csvPath(envName || 'default');
   const ENV_CONFIG_PATH = configPath(envName || 'default');
@@ -659,12 +687,52 @@ app.post('/api/image/build-csv', async (req, res) => {
         asset['jcr:content']?.metadata?.['dam:status'] ||
         asset['jcr:content/metadata/dam:status'] || ''
       ).trim().toLowerCase();
+      const cfFlag = asset['jcr:content']?.contentFragment ?? asset['jcr:content/contentFragment'];
+      const isCF   = cfFlag === true || cfFlag === 'true';
       const filename   = path.posix.basename(jcrPath);
-      const openApiUrl = uuid && damStatus === 'approved'
+      // Content fragments are not deliverable binaries — never build a DM Open API URL
+      // for them; keep the DAM path so downstream tools leave CF references unchanged.
+      const openApiUrl = (!isCF && uuid && damStatus === 'approved')
         ? buildDmOpenApiUrl(cleanHost, uuid, filename)
         : jcrPath;
-      return { path: jcrPath, uuid, scene7Name, scene7File, damStatus, openApiUrl };
+      return { path: jcrPath, uuid, scene7Name, scene7File, damStatus, openApiUrl, isCF: isCF ? 'true' : 'false' };
     });
+
+    // ── Backfill Scene7 fields from the data-old reference CSV ──────────────────
+    // Fill-only-when-empty: a value produced by the fresh crawl is never overwritten;
+    // old data only fills gaps for assets that exist in both (matched by path).
+    const oldS7 = loadOldScene7Map(envName || 'default');
+    if (oldS7) {
+      let matched = 0, filledName = 0, filledFile = 0;
+      for (const row of rows) {
+        const prev = oldS7.get(row.path);
+        if (!prev) continue;
+        matched++;
+        if (!row.scene7Name && prev.scene7Name) { row.scene7Name = prev.scene7Name; filledName++; }
+        if (!row.scene7File && prev.scene7File) { row.scene7File = prev.scene7File; filledFile++; }
+      }
+      log(`Scene7 backfill from data-old: ${matched} common asset(s) — filled scene7Name ${filledName}, scene7File ${filledFile}.`);
+    } else {
+      log(`Scene7 backfill: no reference CSV at data-old/asset-map-${envSlug(envName || 'default')}.csv — skipped.`);
+    }
+
+    // ── Recover Scene7 from the legacy source AEM (authoritative — runs first) ──
+    if (recoverFromSource !== false) {
+      await recoverScene7FromSource(rows, log, {
+        host:     s7SourceHost || appConfig?.source?.host,
+        username: s7SourceUser || appConfig?.source?.username,
+        password: s7SourcePass || appConfig?.source?.password,
+      });
+    } else {
+      log('Scene7 source recovery: skipped (recoverFromSource=false).');
+    }
+
+    // ── Recover remaining image assets by filename + live Scene7 confirm (fallback) ──
+    if (doVerify) {
+      await verifyScene7ForRows(rows, log, { host: s7Host, root: s7Root });
+    } else {
+      log('Scene7 recovery: skipped (verifyScene7=false).');
+    }
 
     const statusCounts = rows.reduce((acc, r) => {
       acc[r.damStatus || '(empty)'] = (acc[r.damStatus || '(empty)'] || 0) + 1;
@@ -673,6 +741,8 @@ app.post('/api/image/build-csv', async (req, res) => {
     log(`damStatus distribution: ${JSON.stringify(statusCounts)}`);
     const dmUrlCount = rows.filter(r => r.openApiUrl.startsWith('https://')).length;
     log(`DM Open API URLs generated: ${dmUrlCount} / ${rows.length}`);
+    const cfCount = rows.filter(r => r.isCF === 'true').length;
+    log(`Content fragments detected: ${cfCount} (kept as DAM paths, not converted to DM URLs)`);
 
     const csv = stringify(rows, {
       header: true,
@@ -683,6 +753,7 @@ app.post('/api/image/build-csv', async (req, res) => {
         { key: 'scene7File',  header: 'scene7File'  },
         { key: 'damStatus',   header: 'damStatus'   },
         { key: 'openApiUrl',  header: 'openApiUrl'  },
+        { key: 'isCF',        header: 'isCF'        },
       ],
     });
 
@@ -721,6 +792,153 @@ function translateModifiers(modifierStr) {
     out.set(mappedKey, v);
   });
   return out.toString();
+}
+
+// ── Scene7 recovery: derive name from filename, then confirm against Scene7 ────
+// When dam:scene7* metadata is missing on the source (e.g. wiped on Dev), the
+// classic Scene7 name can usually be derived from the filename and then CONFIRMED
+// with a live existence check against the Scene7 image server. Only a confirmed
+// hit is written to the CSV, so we never store a guessed/incorrect S7 reference.
+const S7_VERIFY_HOST        = 'abbvie.scene7.com';
+const S7_VERIFY_ROOT        = 'abbviecorp';
+const S7_VERIFY_CONCURRENCY = 20;
+
+// Candidate Scene7 names for a filename, in preference order (deduped).
+function scene7NameCandidates(filename) {
+  const base = filename.replace(/\.[^.]+$/, '');   // strip extension
+  return [...new Set([
+    base,
+    base.replace(/\s+/g, ''),
+    base.replace(/\s+/g, '-'),
+    base.replace(/[^A-Za-z0-9._-]/g, ''),
+  ].filter(Boolean))];
+}
+
+// Ask Scene7 whether a name exists: GET …/is/image/<root>/<name>?req=exists and
+// require HTTP 200 + catalogRecord.exists=1. Resolves false on any error/timeout.
+function scene7Exists(host, root, name) {
+  return new Promise(resolve => {
+    const url = `https://${host}/is/image/${root}/${encodeURIComponent(name)}?req=exists`;
+    const req = https.get(url, { agent: httpsAgent }, res => {
+      let raw = '';
+      res.on('data', c => raw += c);
+      res.on('end', () => resolve(res.statusCode === 200 && /catalogRecord\.exists\s*=\s*1/.test(raw)));
+    });
+    req.on('error', () => resolve(false));
+    req.setTimeout(10000, () => { req.destroy(); resolve(false); });
+  });
+}
+
+// Fill scene7Name/scene7File for image rows still missing them, by deriving a name
+// from the filename and confirming it live. Mutates rows in place; logs progress.
+async function verifyScene7ForRows(rows, log, opts = {}) {
+  const host = opts.host || S7_VERIFY_HOST;
+  const root = opts.root || S7_VERIFY_ROOT;
+
+  const targets = rows.filter(r => {
+    if (r.scene7File) return false;                          // already has S7 (crawl or backfill)
+    const ext = (r.path.split('.').pop() || '').toLowerCase();
+    return DM_IMAGE_EXT.has(ext);                            // only image assets use /is/image/
+  });
+
+  if (targets.length === 0) {
+    log('Scene7 recovery: no image assets missing scene7File — nothing to verify.');
+    return;
+  }
+  log(`Scene7 recovery: probing ${targets.length} image asset(s) against https://${host}/is/image/${root}/ …`);
+
+  let done = 0, confirmed = 0;
+  for (let i = 0; i < targets.length; i += S7_VERIFY_CONCURRENCY) {
+    const batch = targets.slice(i, i + S7_VERIFY_CONCURRENCY);
+    await Promise.all(batch.map(async row => {
+      const filename = path.posix.basename(row.path);
+      for (const name of scene7NameCandidates(filename)) {
+        if (await scene7Exists(host, root, name)) {
+          row.scene7Name = name;
+          row.scene7File = `${root}/${name}`;
+          confirmed++;
+          break;
+        }
+      }
+    }));
+    done += batch.length;
+    log(`Scene7 recovery: ${done} / ${targets.length} probed, ${confirmed} confirmed`);
+  }
+  log(`Scene7 recovery complete — ${confirmed} of ${targets.length} image asset(s) recovered and confirmed.`);
+}
+
+// ── Scene7 recovery from a legacy source AEM that still has the metadata ───────
+// The pre-migration source (config.json → source, e.g. https://34.225.5.238) keeps
+// dam:scene7File/dam:scene7Name. Its DAM paths omit the /corporate segment, so we
+// strip it, GET <path>/jcr:content/metadata.infinity.json, and (on HTTP 200) read
+// the two Scene7 fields straight off the metadata node. Authoritative — preferred
+// over filename-derivation. Fill-only-when-empty.
+const S7_SOURCE_CONCURRENCY = 15;
+const S7_MEDIA_EXT = new Set([...DM_IMAGE_EXT, 'mp4', 'mov', 'm4v', 'webm', 'avi', 'wmv', 'f4v']);
+
+// /content/dam/corporate/abbvie-com2/… → /content/dam/abbvie-com2/…
+function stripCorporate(damPath) {
+  return String(damPath).replace('/content/dam/corporate/', '/content/dam/');
+}
+
+function fetchSourceScene7(host, user, pass, damPath) {
+  return new Promise(resolve => {
+    const url  = `${host.replace(/\/$/, '')}${stripCorporate(damPath)}/jcr:content/metadata.infinity.json`;
+    const auth = Buffer.from(`${user}:${pass}`).toString('base64');
+    const lib  = url.startsWith('https') ? https : http;
+    const opts = {
+      headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+      ...(url.startsWith('https') ? { agent: httpsAgent } : {}),
+    };
+    const req = lib.get(url, opts, res => {
+      if (res.statusCode !== 200) { res.resume(); return resolve(null); }
+      let raw = '';
+      res.on('data', c => raw += c);
+      res.on('end', () => {
+        try {
+          const j = JSON.parse(raw);
+          const scene7File = j['dam:scene7File'] || '';
+          const scene7Name = j['dam:scene7Name'] || '';
+          resolve((scene7File || scene7Name) ? { scene7File, scene7Name } : null);
+        } catch { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.setTimeout(15000, () => { req.destroy(); resolve(null); });
+  });
+}
+
+// Fill scene7Name/scene7File for still-missing media rows from the source AEM.
+async function recoverScene7FromSource(rows, log, src) {
+  if (!src || !src.host || !src.username) {
+    log('Scene7 source recovery: no source AEM configured (config.json → source) — skipped.');
+    return;
+  }
+  const targets = rows.filter(r => {
+    if (r.scene7File) return false;
+    const ext = (r.path.split('.').pop() || '').toLowerCase();
+    return S7_MEDIA_EXT.has(ext);
+  });
+  if (targets.length === 0) {
+    log('Scene7 source recovery: no media assets missing scene7File — nothing to pull.');
+    return;
+  }
+  log(`Scene7 source recovery: pulling metadata for ${targets.length} media asset(s) from ${src.host} (/corporate stripped) …`);
+
+  let done = 0, filled = 0;
+  for (let i = 0; i < targets.length; i += S7_SOURCE_CONCURRENCY) {
+    const batch = targets.slice(i, i + S7_SOURCE_CONCURRENCY);
+    await Promise.all(batch.map(async row => {
+      const found = await fetchSourceScene7(src.host, src.username, src.password, row.path);
+      if (!found) return;
+      if (!row.scene7Name && found.scene7Name) row.scene7Name = found.scene7Name;
+      if (!row.scene7File && found.scene7File) row.scene7File = found.scene7File;
+      filled++;
+    }));
+    done += batch.length;
+    log(`Scene7 source recovery: ${done} / ${targets.length} checked, ${filled} filled`);
+  }
+  log(`Scene7 source recovery complete — ${filled} of ${targets.length} media asset(s) recovered from source.`);
 }
 
 // ── Update ZIP ────────────────────────────────────────────────────────────────
@@ -1150,7 +1368,7 @@ async function queryAllAssets(aemUrl, username, password, damRoot, log) {
   while (more) {
     const params = new URLSearchParams({
       'p.hits':        'selective',
-      'p.properties':  'jcr:uuid jcr:content/metadata/dam:scene7Name jcr:content/metadata/dam:scene7File jcr:content/metadata/dam:status jcr:path',
+      'p.properties':  'jcr:uuid jcr:content/contentFragment jcr:content/metadata/dam:scene7Name jcr:content/metadata/dam:scene7File jcr:content/metadata/dam:status jcr:path',
       'p.guessTotal':  'true',
       path:            damRoot,
       type:            'dam:Asset',
@@ -1676,6 +1894,314 @@ async function buildFixedZip(originalBuffer, fixes) {
   return { buf, fixedCount, unmatchedScene7, changes, unmatchedList };
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// MIGRATION QA (Franklin-page link checker) — detection + fix
+// Only real EDS/Franklin pages are inspected: an XML is scanned/fixed only when it
+// carries cq:template="/libs/core/franklin/templates/page".
+// ══════════════════════════════════════════════════════════════════════════════
+const FRANKLIN_PAGE_RE = /cq:template\s*=\s*"\/libs\/core\/franklin\/templates\/page"/;
+const isFranklinPage = xml => FRANKLIN_PAGE_RE.test(xml);
+
+// Host of an absolute URL (lowercased), or '' if not absolute.
+function qaHost(url) {
+  const m = url.match(/^https?:\/\/([^/'"<>\s]+)/i);
+  return m ? m[1].toLowerCase() : '';
+}
+
+// Classify one extracted link for the QA report, given the package site root R.
+// dm-ok / internal-ok are correct (not problems); the rest map to the 5 checks
+// (+ cross-locale = a full /content path under a different root — valid, review-only).
+function qaClassify(url, siteRoot) {
+  if (/delivery-p\d+-e\d+/i.test(url) || /\/adobe\/assets\//i.test(url)) return 'dm-ok';
+  if (/\.scene7\.com|\/is\/(?:image|content)\//i.test(url))              return 'scene7';
+  if (/^https?:\/\//i.test(url))                                         return 'absolute';
+  if (url.startsWith('/content/dam/')) {
+    const last = url.split('?')[0].split('#')[0].split('/').pop() || '';
+    if (!last.includes('.')) return 'dam-cf';                 // extensionless → content fragment / structural node, not a deliverable asset
+    return /\.pdf$/i.test(last) ? 'pdf-dam' : 'dam-asset';
+  }
+  if (url.startsWith('/content/'))
+    return (siteRoot && (url === siteRoot || url.startsWith(siteRoot + '/'))) ? 'internal-ok' : 'cross-locale';
+  if (/^\/[a-zA-Z]/.test(url)) return 'short-path';
+  return 'other';
+}
+
+// Default guess for which absolute domains are "internal" (a migration mistake to fix)
+// vs genuinely external. The user can override each in the UI.
+const qaGuessInternal = h => /(^|\.)abbvie\.|adobeaemcloud\.com$|(^|\.)adobe\.com$/i.test(h);
+
+// ── Analyze: the 5-check migration-QA rollup ──────────────────────────────────
+app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res) => {
+  const { sessionId, siteRoot, env } = req.body;
+  const buffer = lcSessions.get(sessionId);
+  if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
+  if (!siteRoot || !siteRoot.startsWith('/content/')) {
+    return res.status(400).json({ error: 'Enter a valid site root, e.g. /content/abbvie-nextgen-eds/corporate/abbvie-com/ch/fr' });
+  }
+  const R = siteRoot.replace(/\/$/, '');
+
+  try {
+    const outer = new AdmZip(buffer);
+    const inner = outer.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
+    const zip   = inner ? new AdmZip(inner.getData()) : outer;
+
+    const mk = () => ({ count: 0, files: new Set(), examples: [] });
+    const checks = { shortPath: mk(), absolute: mk(), pdf: mk(), dam: mk(), scene7: mk() };
+    const crossLocale = mk();
+    const domains = new Map();   // host -> { count, files:Set }
+    let pagesScanned = 0, xmlTotal = 0;
+
+    const addEx = (c, file, url) => { c.count++; c.files.add(file); c.examples.push({ file, url }); };   // return all (client lists/filters them)
+
+    for (const entry of zip.getEntries()) {
+      if (entry.isDirectory || !entry.entryName.endsWith('.xml')) continue;
+      xmlTotal++;
+      let content;
+      try { content = entry.getData().toString('utf8'); } catch { continue; }
+      if (!isFranklinPage(content) || lcIsSkipped(entry.entryName)) continue;   // only real pages
+      pagesScanned++;
+      const file = entry.entryName.replace(/^jcr_root/, '');
+
+      for (const url of extractLinks(content)) {
+        const kind = qaClassify(url, R);
+        if      (kind === 'scene7')       addEx(checks.scene7, file, url);
+        else if (kind === 'pdf-dam')      addEx(checks.pdf, file, url);
+        else if (kind === 'dam-asset')    addEx(checks.dam, file, url);
+        else if (kind === 'short-path')   addEx(checks.shortPath, file, url);
+        else if (kind === 'cross-locale') addEx(crossLocale, file, url);
+        else if (kind === 'absolute') {
+          const host = qaHost(url);
+          if (!host) continue;
+          addEx(checks.absolute, file, url);
+          if (!domains.has(host)) domains.set(host, { count: 0, files: new Set() });
+          const d = domains.get(host); d.count++; d.files.add(file);
+        }
+      }
+    }
+
+    const pack = c => ({ count: c.count, files: c.files.size, examples: c.examples });
+
+    res.json({
+      siteRoot: R,
+      pagesScanned,
+      xmlTotal,
+      env: env || '',
+      csvExists: env ? fs.existsSync(csvPath(env)) : false,
+      checks: {
+        shortPath: pack(checks.shortPath),
+        absolute:  pack(checks.absolute),
+        pdf:       pack(checks.pdf),
+        dam:       pack(checks.dam),
+        scene7:    pack(checks.scene7),
+      },
+      domains: [...domains.entries()]
+        .map(([host, d]) => ({ host, count: d.count, files: d.files.size, guessInternal: qaGuessInternal(host) }))
+        .sort((a, b) => b.count - a.count),
+      crossLocale: pack(crossLocale),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── QA fixers (root-driven) ───────────────────────────────────────────────────
+
+// Relative page paths ( /foo/bar , not /content/* or system roots ) → re-rooted to R.
+function qaFixShortPaths(xml, R) {
+  const SYSTEM = /^\/(content|etc|apps|libs|bin|var|conf|home|crx|jcr|oak|system|mnt|tmp|is)\//i;
+  const RE = /([="']|&quot;)(\/[a-zA-Z][a-zA-Z0-9-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9._-]*)+)/g;
+  const changes = [];
+  const result = xml.replace(RE, (m, d, p) => {
+    if (SYSTEM.test(p)) return m;
+    const cleaned = p.replace(/\.html?$/i, '');
+    const np = joinWithPrefix(R, cleaned);
+    if (np === p) return m;
+    changes.push({ oldUrl: p, newUrl: np });
+    return d + np;
+  });
+  return { result, changes };
+}
+
+// Absolute URLs whose host is user-marked-internal → strip host, re-root to R.
+// External hosts are left untouched. Embedded /content/dam prefixes are normalized.
+function qaFixAbsolute(xml, R, internalHosts, damNorm) {
+  if (!internalHosts || internalHosts.size === 0) return { result: xml, changes: [] };
+  const changes = [];
+  const RE = /([="']|&quot;)(https?:\/\/([^/'"<>\s&]+)([^"'<>\s&]*))/gi;
+  const result = xml.replace(RE, (m, d, full, host, tail) => {
+    if (!internalHosts.has(host.toLowerCase())) return m;
+    let path = (tail || '').replace(/\.html?$/i, '') || '/';
+    let np;
+    if (path.startsWith('/content/dam/')) np = damNorm ? normalizeDamPrefix(path, damNorm.correctRoot, damNorm.oldRoots) : path;
+    else if (path.startsWith('/content/')) np = path;
+    else np = joinWithPrefix(R, path);
+    changes.push({ oldUrl: full, newUrl: np });
+    return d + np;
+  });
+  return { result, changes };
+}
+
+// /content/dam refs and absolute scene7.com URLs → DM Open API URLs, via the asset-map.
+// Ported from the Image tool's update-zip: preset/modifier translation, isCF skip,
+// DAM prefix normalization. pathMap = path→row(full); scene7Map = key→openApiUrl.
+function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which) {
+  const w = which || { pdf: true, dam: true, scene7: true };
+  const changes = [], unmatched = [];
+  const applyParams = (baseUrl, translated, preset) => {
+    const out = new URLSearchParams(translated || '');
+    if (preset) out.set('preset', preset);
+    const qs = out.toString().replace(/&/g, '&amp;');
+    return qs ? `${baseUrl}?${qs}` : baseUrl;
+  };
+
+  let content = xml.replace(/(['"])(\/content\/dam\/[^'"]+)\1/g, (match, quote, rawPath) => {
+    const qIdx        = rawPath.indexOf('?');
+    const queryString = (qIdx !== -1 ? rawPath.slice(qIdx + 1) : '').replace(/&amp;/g, '&');
+    const presetMatch = queryString.match(/\$([^$]+)\$/);
+    const presetName  = presetMatch ? presetMatch[1] : '';
+    const modifierStr = queryString.replace(/\$[^$]+\$/g, '').replace(/^&+|&+$/g, '').replace(/&&+/g, '&');
+    const translated  = translateModifiers(modifierStr);
+    let cleanPath = rawPath.split('?')[0].split('#')[0]
+      .replace(/\/_jcr_content\/renditions\/.*$/, '')
+      .replace(/\.coreimg.*$/, '');
+    if (damNorm) cleanPath = normalizeDamPrefix(cleanPath, damNorm.correctRoot, damNorm.oldRoots);
+    const lastSeg = cleanPath.split('/').pop() || '';
+    if (!lastSeg.includes('.')) return match;                // extensionless → content fragment / structural node, never converted
+    const isPdf = /\.pdf$/i.test(lastSeg);
+    if (isPdf ? !w.pdf : !w.dam) return match;               // this category not selected
+    const row = pathMap && pathMap.get(cleanPath);
+    if (row) {
+      if (row.isCF === 'true') return match;                      // content fragment — leave unchanged
+      if (!/^https?:\/\//i.test(row.openApiUrl)) { unmatched.push(rawPath); return match; }  // not on DM yet
+      const finalUrl = applyParams(row.openApiUrl, translated, presetName);
+      changes.push({ oldUrl: rawPath, newUrl: finalUrl });
+      return `${quote}${finalUrl}${quote}`;
+    }
+    unmatched.push(rawPath);
+    return match;
+  });
+
+  if (w.scene7) content = content.replace(/(['"])(https?:\/\/[^'"]*\.scene7\.com\/is\/(?:image|content)\/([^?'"]+)([^'"]*)?)\1/g, (match, quote, fullUrl, s7Key, qs) => {
+    const queryString = (qs ? qs.replace(/^\?/, '') : '').replace(/&amp;/g, '&');
+    const presetMatch = queryString.match(/\$([^$]+)\$/);
+    const presetName  = presetMatch ? presetMatch[1] : '';
+    const modifierStr = queryString.replace(/\$[^$]+\$/g, '').replace(/(?:^|&)ts=[^&]*/g, '').replace(/^&+|&+$/g, '').replace(/&&+/g, '&');
+    const translated  = translateModifiers(modifierStr);
+    const dmUrl = scene7Map && scene7Map.get(s7Key.trim().toLowerCase());
+    if (dmUrl && /^https?:\/\//i.test(dmUrl)) {
+      const finalUrl = applyParams(dmUrl, translated, presetName);
+      changes.push({ oldUrl: fullUrl, newUrl: finalUrl });
+      return `${quote}${finalUrl}${quote}`;
+    }
+    unmatched.push(s7Key.trim());
+    return match;
+  });
+
+  return { result: content, changes, unmatched };
+}
+
+// Apply all QA fixes to every Franklin page in the ZIP (nested or flat).
+// Order: absolute → asset→DM → short-paths (so each step's output is safe for the next).
+async function buildQaFixedZip(buffer, opts) {
+  const { siteRoot, internalHosts, pathMap, scene7Map, damNorm } = opts;
+  const sel        = opts.checks || new Set(['shortPath', 'absolute', 'pdf', 'dam', 'scene7']);
+  const assetWhich = { pdf: sel.has('pdf'), dam: sel.has('dam'), scene7: sel.has('scene7') };
+  const doAsset    = assetWhich.pdf || assetWhich.dam || assetWhich.scene7;
+  const outerAdm   = new AdmZip(buffer);
+  const innerEntry = outerAdm.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
+  const changes = [], unmatched = [];
+  let pagesFixed = 0;
+
+  async function patch(adm) {
+    const jsz = new JSZip();
+    for (const e of adm.getEntries()) {
+      if (e.isDirectory) continue;
+      const name = e.entryName;
+      if (name.endsWith('.xml') && !lcIsSkipped(name)) {
+        const before = e.getData().toString('utf8');
+        if (isFranklinPage(before)) {
+          const file = name.replace(/^jcr_root/, '');
+          let after = before;
+          const a = sel.has('absolute') ? qaFixAbsolute(after, siteRoot, internalHosts, damNorm) : { result: after, changes: [] };            after = a.result;
+          const b = doAsset             ? qaFixAssetRefs(after, pathMap, scene7Map, damNorm, assetWhich) : { result: after, changes: [], unmatched: [] }; after = b.result;
+          const c = sel.has('shortPath') ? qaFixShortPaths(after, siteRoot) : { result: after, changes: [] };                                  after = c.result;
+          for (const ch of a.changes) changes.push({ file, type: 'absolute',   ...ch });
+          for (const ch of b.changes) changes.push({ file, type: 'asset-dm',   ...ch });
+          for (const ch of c.changes) changes.push({ file, type: 'short-path', ...ch });
+          for (const u  of b.unmatched) unmatched.push({ file, url: u });
+          if (after !== before) pagesFixed++;
+          jsz.file(name, after);
+          continue;
+        }
+      }
+      jsz.file(name, e.getData());
+    }
+    return jsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  }
+
+  if (innerEntry) {
+    const patchedInner = await patch(new AdmZip(innerEntry.getData()));
+    const outerJsz = new JSZip();
+    for (const e of outerAdm.getEntries()) {
+      if (e.isDirectory) continue;
+      outerJsz.file(e.entryName, e.entryName === innerEntry.entryName ? patchedInner : e.getData());
+    }
+    return { buf: await outerJsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), changes, unmatched, pagesFixed };
+  }
+  return { buf: await patch(outerAdm), changes, unmatched, pagesFixed };
+}
+
+// ── Fix: apply the QA fixes and return the patched ZIP + change report ────────
+app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, res) => {
+  const { sessionId, siteRoot, env, internalDomains, checks } = req.body;
+  const buffer = lcSessions.get(sessionId);
+  if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
+  if (!siteRoot || !siteRoot.startsWith('/content/')) return res.status(400).json({ error: 'Enter a valid site root.' });
+  const R = siteRoot.replace(/\/$/, '');
+  const internalHosts = new Set((internalDomains || []).map(h => String(h).toLowerCase()));
+  const sel      = new Set(Array.isArray(checks) && checks.length ? checks : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7']);
+  const needsCsv = sel.has('pdf') || sel.has('dam') || sel.has('scene7');
+
+  try {
+    let pathMap = null, scene7Map = null, damNorm = null;
+    if (needsCsv) {
+      if (!env) return res.status(400).json({ error: 'Select a target environment for PDF / DAM / Scene7 → DM conversion.' });
+      const file = csvPath(env);
+      if (!fs.existsSync(file)) return res.status(400).json({ error: `No asset-map CSV for environment "${env}". Build it in the Image/Asset tool first.` });
+      const rows = parse(fs.readFileSync(file, 'utf8'), { columns: true, skip_empty_lines: true });
+      pathMap   = new Map(rows.filter(r => r.path && r.openApiUrl).map(r => [r.path, r]));
+      scene7Map = buildScene7LookupMap(rows);
+      const se  = loadSiteConfig().environments.find(e => e.name === env);
+      damNorm   = { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
+    }
+
+    const { buf, changes, unmatched, pagesFixed } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel });
+    lcSessions.set(sessionId, buf);   // keep session, chained on the fixed result (enables per-category iteration + re-scan)
+
+    const reportRows = changes.map(c => ({ file: c.file, type: c.type, status: 'changed', oldUrl: c.oldUrl, newUrl: c.newUrl }));
+    for (const u of unmatched) reportRows.push({ file: u.file, type: 'asset-dm', status: 'unmatched (no CSV entry)', oldUrl: u.url, newUrl: '' });
+    const reportCsv = stringify(reportRows, { header: true, columns: [
+      { key: 'file', header: 'file' }, { key: 'type', header: 'type' }, { key: 'status', header: 'status' },
+      { key: 'oldUrl', header: 'old_url' }, { key: 'newUrl', header: 'new_url' },
+    ] });
+    const reportId = randomUUID();
+    lcReports.set(reportId, reportCsv);
+    setTimeout(() => lcReports.delete(reportId), 15 * 60 * 1000).unref?.();
+
+    const counts = changes.reduce((a, c) => (a[c.type] = (a[c.type] || 0) + 1, a), {});
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="qa-fixed-package.zip"');
+    res.setHeader('X-Pages-Fixed',  String(pagesFixed));
+    res.setHeader('X-Change-Count', String(changes.length));
+    res.setHeader('X-Unmatched',    String(unmatched.length));
+    res.setHeader('X-Counts',       Buffer.from(JSON.stringify(counts)).toString('base64'));
+    res.setHeader('X-Report-Id',    reportId);
+    res.send(buf);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Check ZIP ─────────────────────────────────────────────────────────────────
 app.post('/api/link-checker/check', (req, res, next) => {
   upload.single('zip')(req, res, err => {
@@ -1797,95 +2323,6 @@ async function headCheckReport(reportRows, cfg) {
   return { checked: jobs.length, notFound, errors };
 }
 
-// ── Fix all issues and return patched ZIP ─────────────────────────────────────
-app.post('/api/link-checker/fix-issues', express.json({ limit: '2mb' }), async (req, res) => {
-  const { sessionId, fixes } = req.body;
-  const buffer = lcSessions.get(sessionId);
-  if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
-
-  try {
-    if (fixes.scene7?.csvEnv) {
-      const csvFile = path.join(DATA_DIR, `asset-map-${fixes.scene7.csvEnv}.csv`);
-      if (!fs.existsSync(csvFile)) {
-        return res.status(400).json({ error: `No CSV found for environment "${fixes.scene7.csvEnv}". Build it first in the Image/Asset tool.` });
-      }
-      const rows = parse(fs.readFileSync(csvFile, 'utf8'), { columns: true, skip_empty_lines: true });
-      fixes.scene7.lookupMap = buildScene7LookupMap(rows);
-    }
-
-    // Resolve optional PDF → DM conversion config (env → asset-map CSV + DAM normalization)
-    if (fixes.pdfToDm?.env) {
-      const pmap = loadDamPathMap(fixes.pdfToDm.env);
-      if (!pmap) return res.status(400).json({ error: `PDF conversion needs an asset-map CSV — none found for environment "${fixes.pdfToDm.env}". Build it in the Image/Asset tool first.` });
-      const se = loadSiteConfig().environments.find(e => e.name === fixes.pdfToDm.env);
-      fixes.pdfToDm = {
-        pathMap: pmap,
-        damNorm: { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] },
-      };
-    }
-
-    // Enrich absBaseUrl fix with the locales array from site.config.json.
-    // getDomainForLocale() does prefix matching against liveCopyPath and blueprintPath,
-    // so /gr, /gr/el, and /language-masters/gr all resolve to the same domain.
-    if (fixes.absBaseUrl) {
-      const siteConf = loadSiteConfig();
-      if (siteConf.locales?.length) {
-        fixes.absBaseUrl.locales = siteConf.locales;
-      }
-    }
-
-    // Resolve optional HEAD-validation config (env → AEM author host from site.config)
-    let validateCfg = null;
-    if (fixes.validate?.env) {
-      const env = loadSiteConfig().environments.find(e => e.name === fixes.validate.env);
-      if (!env) return res.status(400).json({ error: `Environment "${fixes.validate.env}" not found in site.config.json.` });
-      validateCfg = { aemHost: env.aemUrl, username: fixes.validate.username, password: fixes.validate.password };
-    }
-
-    const { buf, fixedCount, unmatchedScene7, changes, unmatchedList } = await buildFixedZip(buffer, fixes);
-    lcSessions.delete(sessionId);
-
-    // Build a change-report CSV: every rewrite plus any unmatched Scene7 URL
-    const reportRows = changes.map(c => ({
-      file: c.file, type: c.type, status: c.status || 'changed', oldUrl: c.oldUrl, newUrl: c.newUrl,
-    }));
-    for (const u of unmatchedList) {
-      reportRows.push({ file: u.file, type: 'scene7', status: 'unmatched (no CSV entry)', oldUrl: u.oldUrl, newUrl: '' });
-    }
-
-    // Optional: HEAD-check each rewritten URL against AEM and record the status.
-    const headSummary = await headCheckReport(reportRows, validateCfg);
-
-    const reportCsv = stringify(reportRows, {
-      header: true,
-      columns: [
-        { key: 'file',       header: 'file'        },
-        { key: 'type',       header: 'type'        },
-        { key: 'status',     header: 'status'      },
-        { key: 'oldUrl',     header: 'old_url'     },
-        { key: 'newUrl',     header: 'new_url'     },
-        { key: 'headStatus', header: 'head_status' },
-      ],
-    });
-    const reportId = randomUUID();
-    lcReports.set(reportId, reportCsv);
-    setTimeout(() => lcReports.delete(reportId), 15 * 60 * 1000).unref?.();
-
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename="fixed-package.zip"');
-    res.setHeader('X-Fixed-Count',      String(fixedCount));
-    res.setHeader('X-Unmatched-Scene7', String(unmatchedScene7));
-    res.setHeader('X-Change-Count',     String(changes.length));
-    res.setHeader('X-Head-Checked',     String(headSummary.checked));
-    res.setHeader('X-Head-404',         String(headSummary.notFound));
-    res.setHeader('X-Head-Errors',      String(headSummary.errors));
-    res.setHeader('X-Report-Id',        reportId);
-    res.send(buf);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ── Download the change report from the last fix ──────────────────────────────
 app.get('/api/link-checker/fix-report/:id', (req, res) => {
   const csv = lcReports.get(req.params.id);
@@ -1893,114 +2330,6 @@ app.get('/api/link-checker/fix-report/:id', (req, res) => {
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="fix-change-report.csv"');
   res.send(csv);
-});
-
-// ── Resolve PDF DAM paths → DM Open API URLs (for the viewable PDF list) ──────
-app.post('/api/link-checker/pdf-dm-urls', express.json({ limit: '2mb' }), (req, res) => {
-  const { env, paths } = req.body;
-  const pathMap = loadDamPathMap(env);
-  if (!pathMap) return res.status(400).json({ error: `No asset-map CSV found for environment "${env || '(none)'}". Build it in the Image/Asset tool first.` });
-  const se = loadSiteConfig().environments.find(e => e.name === env);
-  const damNorm = { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
-  const resolve = u => {
-    const s = String(u);
-    // Already a DM delivery URL (…/adobe/assets/…/as/…​.pdf)? Just correct /as/ → /original/as/.
-    if (/\/adobe\/assets\//i.test(s) && /^https?:\/\//i.test(s)) return ensureOriginalDelivery(s);
-    const raw = s.replace(/^https?:\/\/[^/]+/, '').split('?')[0].split('#')[0];  // strip any host
-    if (!raw.startsWith('/content/dam/')) return '';
-    const dm = pathMap.get(raw) || pathMap.get(normalizeDamPrefix(raw, damNorm.correctRoot, damNorm.oldRoots));
-    return (dm && /^https?:\/\//i.test(dm)) ? ensureOriginalDelivery(dm) : '';
-  };
-  res.json({ resolved: (paths || []).map(resolve) });
-});
-
-// ── Convert PDF DAM links → DM Open API URLs and return patched ZIP ───────────
-app.post('/api/link-checker/convert-pdfs', express.json({ limit: '1mb' }), async (req, res) => {
-  const { sessionId, env } = req.body;
-  const buffer = lcSessions.get(sessionId);
-  if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
-
-  const pathMap = loadDamPathMap(env);
-  if (!pathMap) return res.status(400).json({ error: `No asset-map CSV found for environment "${env || '(none)'}". Build it in the Image/Asset tool first.` });
-
-  // Normalize each PDF's DAM prefix to the correct root before the CSV lookup, so
-  // un-normalized paths (/content/dam/abbvie-com2/…, dotted, stray-corporate) still match.
-  const siteEnv = loadSiteConfig().environments.find(e => e.name === env);
-  const damNorm = {
-    correctRoot: siteEnv?.damRoot || '/content/dam/corporate/abbvie-com2',
-    oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'],
-  };
-
-  try {
-    const { buf, changes, converted, unmatched } = await convertPdfsInZip(buffer, pathMap, damNorm);
-    // Keep the session so the user can re-run with a different environment.
-    const reportCsv = stringify(changes, {
-      header: true,
-      columns: [
-        { key: 'file',   header: 'file'    },
-        { key: 'oldUrl', header: 'old_pdf' },
-        { key: 'newUrl', header: 'dm_url'  },
-        { key: 'status', header: 'status'  },
-      ],
-    });
-    const reportId = randomUUID();
-    lcReports.set(reportId, reportCsv);
-    setTimeout(() => lcReports.delete(reportId), 15 * 60 * 1000).unref?.();
-
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename="pdfs-converted.zip"');
-    res.setHeader('X-Pdf-Converted', String(converted));
-    res.setHeader('X-Pdf-Unmatched', String(unmatched));
-    res.setHeader('X-Report-Id',     reportId);
-    res.send(buf);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── Export link report as CSV ─────────────────────────────────────────────────
-app.post('/api/link-checker/export-csv', express.json({ limit: '50mb' }), (req, res) => {
-  const { files } = req.body;
-  if (!files?.length) return res.status(400).json({ error: 'No data to export.' });
-
-  const rows = [];
-  files.forEach(f => {
-    f.links.forEach(l => rows.push({ file: f.file, url: l.url, type: l.type }));
-  });
-
-  const csv = stringify(rows, {
-    header: true,
-    columns: [
-      { key: 'file', header: 'file' },
-      { key: 'url',  header: 'url'  },
-      { key: 'type', header: 'type' },
-    ],
-  });
-
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename="link-report.csv"');
-  res.send(csv);
-});
-
-// ── Fix short paths (legacy route — kept for backward compatibility) ───────────
-app.post('/api/link-checker/fix-short-paths', express.json({ limit: '1mb' }), async (req, res) => {
-  const { sessionId, prefix } = req.body;
-  if (!sessionId || !prefix) return res.status(400).json({ error: 'Missing sessionId or prefix.' });
-  if (!prefix.startsWith('/'))  return res.status(400).json({ error: 'Prefix must start with /.' });
-
-  const buffer = lcSessions.get(sessionId);
-  if (!buffer) return res.status(404).json({ error: 'Session not found or expired — please re-upload the ZIP.' });
-
-  try {
-    const { buf, fixedCount } = await buildFixedZip(buffer, { siteRoot: prefix, shortPath: true });
-    lcSessions.delete(sessionId);
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename="fixed-package.zip"');
-    res.setHeader('X-Fixed-Count', String(fixedCount));
-    res.send(buf);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
