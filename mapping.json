@@ -1,4 +1,9 @@
 [
+{
+    "aem": "cq:tags",
+    "eds": "cq:tags",
+    "transform": "aem-tag-to-eds"
+  },
   {
     "aem": "ctaAltText",
     "eds": "ctaAltText"
