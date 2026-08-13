@@ -1245,11 +1245,17 @@ const LC_CHECKS = [
 
 async function lcInit() {
   try {
-    const data  = await (await fetch('/api/image/csv-status')).json();
-    const built = (data.statuses || []).filter(s => s.exists);
+    // List ALL configured environments (same source as the Image/Asset tab), and
+    // annotate each with whether it has a built asset-map CSV (needed for PDF/DAM/Scene7 → DM).
+    const [cfg, status] = await Promise.all([
+      fetch('/api/image/site-config').then(r => r.json()),
+      fetch('/api/image/csv-status').then(r => r.json()).catch(() => ({ statuses: [] })),
+    ]);
+    const built = new Set((status.statuses || []).filter(s => s.exists).map(s => s.name));
+    const envs  = cfg.environments || [];
     const sel   = document.getElementById('lcEnv');
     if (sel) sel.innerHTML = '<option value="">— select —</option>' +
-      built.map(s => `<option value="${escHtml(s.name)}">${escHtml(s.name)}</option>`).join('');
+      envs.map(e => `<option value="${escHtml(e.name)}">${escHtml(e.name)}${built.has(e.name) ? ' ✓ CSV' : ' — no CSV'}</option>`).join('');
   } catch { /* no envs */ }
 }
 

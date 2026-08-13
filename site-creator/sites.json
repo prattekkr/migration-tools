@@ -178,7 +178,7 @@
       "status": "Suspended"
     },
     {
-      "base": "abbvie-be-fr",
+      "base": "abbvie-be",
       "country": "Belgium",
       "folder": "be",
       "region": "Europe",
@@ -188,18 +188,7 @@
       "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/be/fr",
       "status": "Suspended"
     },
-    {
-      "base": "abbvie-be-nl",
-      "country": "Belgium",
-      "folder": "be",
-      "region": "Europe",
-      "language": "Dutch",
-      "lang": "nl",
-      "domain": "abbvie.be",
-      "contentPath": "/content/abbvie-nextgen-eds/corporate/abbvie-com/be/nl",
-      "status": "will be created after be/fr is migrated."
-    },
-    {
+     {
       "base": "abbvie-nl",
       "country": "Netherlands",
       "folder": "nl",
