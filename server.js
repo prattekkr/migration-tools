@@ -1436,6 +1436,11 @@ function extractLinks(xmlContent) {
     links.push(url);
   };
 
+  // Quoted attribute values that ARE a single /content/... path — capture the WHOLE value,
+  // allowing spaces (AEM asset filenames can contain them, e.g. "Woman standing at desk.jpg").
+  // Runs first so spaced asset paths are captured in full before the whitespace-terminated passes.
+  for (const m of decoded.matchAll(/=(["'])(\/content\/[^"'<>]+)\1/g)) add(m[2]);
+
   for (const m of decoded.matchAll(/["'\s=>(](\/(content)\/[^"'\s<>&\]{}|\\]+)/g)) add(m[1]);
   for (const m of decoded.matchAll(/["'\s=>(](https?:\/\/[^"'\s<>&\]{}|\\]+)/g)) add(m[1]);
   for (const m of decoded.matchAll(/["'\s=>(](\/[a-zA-Z][a-zA-Z0-9-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9._-]*)+)/g)) {
@@ -1908,10 +1913,25 @@ function qaHost(url) {
   return m ? m[1].toLowerCase() : '';
 }
 
+// The authored-block region of a Franklin page .content.xml — everything INSIDE
+// <jcr:content ...> … </jcr:content>, EXCLUDING the page node's own properties (which
+// live as attributes on the jcr:content start tag: cq:template, cq:tags, and MSM /
+// language-copy references like cq:master/blueprint/source that can point at another
+// locale). Only real block content is scanned/fixed; page metadata is left intact.
+// Returns { before, region, after } for reassembly; falls back to the whole doc.
+function franklinBlockRegion(xml) {
+  const open  = xml.match(/<jcr:content(?:"[^"]*"|'[^']*'|[^>"'])*>/);
+  const close = xml.lastIndexOf('</jcr:content>');
+  if (!open || close < 0) return { before: '', region: xml, after: '' };
+  const start = open.index + open[0].length;
+  if (close < start) return { before: '', region: xml, after: '' };
+  return { before: xml.slice(0, start), region: xml.slice(start, close), after: xml.slice(close) };
+}
+
 // Classify one extracted link for the QA report, given the package site root R.
 // dm-ok / internal-ok are correct (not problems); the rest map to the 5 checks
 // (+ cross-locale = a full /content path under a different root — valid, review-only).
-function qaClassify(url, siteRoot) {
+function qaClassify(url, siteRoot, pageIsLangMaster) {
   if (/delivery-p\d+-e\d+/i.test(url) || /\/adobe\/assets\//i.test(url)) return 'dm-ok';
   if (/\.scene7\.com|\/is\/(?:image|content)\//i.test(url))              return 'scene7';
   if (/^https?:\/\//i.test(url))                                         return 'absolute';
@@ -1920,8 +1940,10 @@ function qaClassify(url, siteRoot) {
     if (!last.includes('.')) return 'dam-cf';                 // extensionless → content fragment / structural node, not a deliverable asset
     return /\.pdf$/i.test(last) ? 'pdf-dam' : 'dam-asset';
   }
-  if (url.startsWith('/content/'))
+  if (url.startsWith('/content/')) {
+    if (pageIsLangMaster && /\/language-masters\//i.test(url)) return 'internal-ok';   // blueprint PAGE linking to blueprint content is fine; on a live page a language-masters link is still flagged
     return (siteRoot && (url === siteRoot || url.startsWith(siteRoot + '/'))) ? 'internal-ok' : 'cross-locale';
+  }
   if (/^\/[a-zA-Z]/.test(url)) return 'short-path';
   return 'other';
 }
@@ -1961,9 +1983,10 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
       if (!isFranklinPage(content) || lcIsSkipped(entry.entryName)) continue;   // only real pages
       pagesScanned++;
       const file = entry.entryName.replace(/^jcr_root/, '');
+      const pageIsLM = /\/language-masters\//i.test(entry.entryName);   // is THIS page a blueprint/language-master page?
 
-      for (const url of extractLinks(content)) {
-        const kind = qaClassify(url, R);
+      for (const url of extractLinks(franklinBlockRegion(content).region)) {   // authored blocks only, not page-node props
+        const kind = qaClassify(url, R, pageIsLM);
         if      (kind === 'scene7')       addEx(checks.scene7, file, url);
         else if (kind === 'pdf-dam')      addEx(checks.pdf, file, url);
         else if (kind === 'dam-asset')    addEx(checks.dam, file, url);
@@ -2121,10 +2144,12 @@ async function buildQaFixedZip(buffer, opts) {
         const before = e.getData().toString('utf8');
         if (isFranklinPage(before)) {
           const file = name.replace(/^jcr_root/, '');
-          let after = before;
-          const a = sel.has('absolute') ? qaFixAbsolute(after, siteRoot, internalHosts, damNorm) : { result: after, changes: [] };            after = a.result;
-          const b = doAsset             ? qaFixAssetRefs(after, pathMap, scene7Map, damNorm, assetWhich) : { result: after, changes: [], unmatched: [] }; after = b.result;
-          const c = sel.has('shortPath') ? qaFixShortPaths(after, siteRoot) : { result: after, changes: [] };                                  after = c.result;
+          const { before: pre, region, after: post } = franklinBlockRegion(before);
+          let body = region;   // fix only the authored blocks; page-node properties stay untouched
+          const a = sel.has('absolute') ? qaFixAbsolute(body, siteRoot, internalHosts, damNorm) : { result: body, changes: [] };            body = a.result;
+          const b = doAsset             ? qaFixAssetRefs(body, pathMap, scene7Map, damNorm, assetWhich) : { result: body, changes: [], unmatched: [] }; body = b.result;
+          const c = sel.has('shortPath') ? qaFixShortPaths(body, siteRoot) : { result: body, changes: [] };                                  body = c.result;
+          const after = pre + body + post;
           for (const ch of a.changes) changes.push({ file, type: 'absolute',   ...ch });
           for (const ch of b.changes) changes.push({ file, type: 'asset-dm',   ...ch });
           for (const ch of c.changes) changes.push({ file, type: 'short-path', ...ch });
