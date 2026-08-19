@@ -626,16 +626,20 @@ app.get('/api/image/site-config', (req, res) => {
 app.get('/api/image/csv-status', (req, res) => {
   const { environments = [] } = loadSiteConfig();
   const statuses = environments.map(env => {
+    // The CSV is what every consumer (link-checker fix/analyze, image update-zip) actually
+    // reads — the config-<env>.json sidecar only carries build metadata (lastBuilt/count)
+    // and is written by build-csv. A CSV placed in data/ by any other means (manual copy,
+    // restored from data-old, etc.) is still perfectly usable even without that sidecar,
+    // so its absence must not mask a real, usable CSV.
+    if (!fs.existsSync(csvPath(env.name))) return { name: env.name, exists: false };
     const cp = configPath(env.name);
-    if (!fs.existsSync(csvPath(env.name)) || !fs.existsSync(cp)) {
-      return { name: env.name, exists: false };
+    if (fs.existsSync(cp)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(cp, 'utf8'));
+        return { name: env.name, exists: true, ...config };
+      } catch { /* corrupt sidecar — fall through to bare exists */ }
     }
-    try {
-      const config = JSON.parse(fs.readFileSync(cp, 'utf8'));
-      return { name: env.name, exists: true, ...config };
-    } catch {
-      return { name: env.name, exists: false };
-    }
+    return { name: env.name, exists: true };
   });
   res.json({ statuses });
 });
@@ -939,6 +943,118 @@ async function recoverScene7FromSource(rows, log, src) {
     log(`Scene7 source recovery: ${done} / ${targets.length} checked, ${filled} filled`);
   }
   log(`Scene7 source recovery complete — ${filled} of ${targets.length} media asset(s) recovered from source.`);
+}
+
+// ── Live DM Open API URL recovery from the current AEM author ──────────────────
+// Used by the Link Checker's Fix flow when the asset-map CSV has no usable DM URL
+// for a referenced DAM path (missing row, or row crawled before the asset was
+// approved). Queries the environment's AEM author directly for that one asset —
+// unlike the legacy source above, its DAM paths already carry /corporate/, so no
+// path stripping is needed. Two lightweight GETs (mirrors the Page Metadata tool's
+// `${path}/jcr:content.1.json` convention): the node itself for jcr:uuid, and its
+// jcr:content at depth 1 for the contentFragment flag + dam:status/scene7 metadata.
+function fetchAssetFromAuthor(aemUrl, username, password, damPath) {
+  const base = aemUrl.replace(/\/$/, '');
+  const get  = (url) => new Promise((resolve, reject) => {
+    const auth = Buffer.from(`${username}:${password}`).toString('base64');
+    const lib  = url.startsWith('https') ? https : http;
+    const opts = {
+      headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+      ...(url.startsWith('https') ? { agent: httpsAgent } : {}),
+    };
+    const req = lib.get(url, opts, res => {
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+      let raw = '';
+      res.on('data', c => raw += c);
+      res.on('end', () => { try { resolve(JSON.parse(raw)); } catch (e) { reject(e); } });
+    });
+    req.on('error', reject);
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error('timeout')); });
+  });
+
+  return Promise.all([
+    get(`${base}${damPath}.json`),
+    get(`${base}${damPath}/jcr:content.1.json`).catch(() => ({})),
+  ]).then(([node, content]) => {
+    const uuid = (node['jcr:uuid'] || '').trim();
+    if (!uuid) return null;
+    const cfFlag = content?.contentFragment;
+    return {
+      uuid,
+      isCF:       cfFlag === true || cfFlag === 'true',
+      damStatus:  (content?.metadata?.['dam:status'] || '').trim().toLowerCase(),
+      scene7Name: content?.metadata?.['dam:scene7Name'] || '',
+      scene7File: content?.metadata?.['dam:scene7File'] || '',
+    };
+  }).catch(() => null);   // asset not found / auth error / network error — treat as "not found"
+}
+
+const DM_AUTHOR_RECOVERY_CONCURRENCY = 10;
+
+// Live-check each candidate DAM path against AEM author; on a confirmed approved
+// asset, compute its DM Open API URL (same predicate build-csv uses) and write the
+// row directly into `pathMap` (by reference) so the caller's current Fix pass picks
+// it up immediately. Returns the newly-recovered rows for CSV persistence/reporting.
+async function recoverDmUrlsFromAuthor(paths, pathMap, opts, log) {
+  const { aemUrl, dmHost, username, password } = opts || {};
+  const recovered = [];
+  if (!aemUrl || !dmHost || !username) {
+    log?.('DM author recovery: no AEM author URL/DM host/credentials available for this environment — skipped.');
+    return recovered;
+  }
+  const cleanHost = dmHost.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  log?.(`DM author recovery: checking ${paths.length} unresolved asset(s) against ${aemUrl} …`);
+
+  let checked = 0;
+  for (let i = 0; i < paths.length; i += DM_AUTHOR_RECOVERY_CONCURRENCY) {
+    const batch = paths.slice(i, i + DM_AUTHOR_RECOVERY_CONCURRENCY);
+    await Promise.all(batch.map(async (damPath) => {
+      const found = await fetchAssetFromAuthor(aemUrl, username, password, damPath);
+      if (found) {
+        const filename   = path.posix.basename(damPath);
+        const openApiUrl = (!found.isCF && found.uuid && found.damStatus === 'approved')
+          ? buildDmOpenApiUrl(cleanHost, found.uuid, filename)
+          : damPath;
+        if (/^https?:\/\//i.test(openApiUrl)) {
+          const row = {
+            path: damPath, uuid: found.uuid, scene7Name: found.scene7Name, scene7File: found.scene7File,
+            damStatus: found.damStatus, openApiUrl, isCF: found.isCF ? 'true' : 'false',
+          };
+          pathMap.set(damPath, row);
+          recovered.push(row);
+        }
+      }
+    }));
+    checked += batch.length;
+  }
+  log?.(`DM author recovery complete — ${recovered.length} of ${paths.length} asset(s) recovered and confirmed on DM.`);
+  return recovered;
+}
+
+// Persist newly-recovered rows into data/asset-map-<env>.csv (update by path, or
+// append if the row didn't exist before) so future Fix runs never need to re-check
+// AEM author for the same asset. Same 7-column schema build-csv writes.
+function persistRecoveredRows(env, recoveredRows) {
+  if (!recoveredRows || !recoveredRows.length) return;
+  const file = csvPath(env);
+  const existingRows = fs.existsSync(file)
+    ? parse(fs.readFileSync(file, 'utf8'), { columns: true, skip_empty_lines: true })
+    : [];
+  const byPath = new Map(existingRows.map(r => [r.path, r]));
+  for (const r of recoveredRows) byPath.set(r.path, r);
+  const csv = stringify([...byPath.values()], {
+    header: true,
+    columns: [
+      { key: 'path',        header: 'path'        },
+      { key: 'uuid',        header: 'uuid'        },
+      { key: 'scene7Name',  header: 'scene7Name'  },
+      { key: 'scene7File',  header: 'scene7File'  },
+      { key: 'damStatus',   header: 'damStatus'   },
+      { key: 'openApiUrl',  header: 'openApiUrl'  },
+      { key: 'isCF',        header: 'isCF'        },
+    ],
+  });
+  fs.writeFileSync(file, csv, 'utf8');
 }
 
 // ── Update ZIP ────────────────────────────────────────────────────────────────
@@ -2077,7 +2193,12 @@ function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which) {
     return qs ? `${baseUrl}?${qs}` : baseUrl;
   };
 
-  let content = xml.replace(/(['"])(\/content\/dam\/[^'"]+)\1/g, (match, quote, rawPath) => {
+  // Delimiter is a real quote/'=' OR an HTML-entity-encoded quote (&quot;) — DAM/PDF refs
+  // embedded inside rich-text attributes (e.g. an <a href="..."> inside an RTE `text=`
+  // value) are XML-escaped, so the boundary around the path is literally "&quot;", not
+  // a bare quote character. '&' is excluded from the path body so that boundary always
+  // terminates the match instead of being swallowed into the captured path.
+  let content = xml.replace(/(["'=]|&quot;)(\/content\/dam\/[^"'<>\s&]*)/g, (match, delim, rawPath) => {
     const qIdx        = rawPath.indexOf('?');
     const queryString = (qIdx !== -1 ? rawPath.slice(qIdx + 1) : '').replace(/&amp;/g, '&');
     const presetMatch = queryString.match(/\$([^$]+)\$/);
@@ -2098,13 +2219,13 @@ function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which) {
       if (!/^https?:\/\//i.test(row.openApiUrl)) { unmatched.push(rawPath); return match; }  // not on DM yet
       const finalUrl = applyParams(row.openApiUrl, translated, presetName);
       changes.push({ oldUrl: rawPath, newUrl: finalUrl });
-      return `${quote}${finalUrl}${quote}`;
+      return delim + finalUrl;
     }
     unmatched.push(rawPath);
     return match;
   });
 
-  if (w.scene7) content = content.replace(/(['"])(https?:\/\/[^'"]*\.scene7\.com\/is\/(?:image|content)\/([^?'"]+)([^'"]*)?)\1/g, (match, quote, fullUrl, s7Key, qs) => {
+  if (w.scene7) content = content.replace(/(["'=]|&quot;)(https?:\/\/[^"'<>\s&]*\.scene7\.com\/is\/(?:image|content)\/([^"'<>\s?&]+)(\?[^"'<>\s&]*)?)/gi, (match, delim, fullUrl, s7Key, qs) => {
     const queryString = (qs ? qs.replace(/^\?/, '') : '').replace(/&amp;/g, '&');
     const presetMatch = queryString.match(/\$([^$]+)\$/);
     const presetName  = presetMatch ? presetMatch[1] : '';
@@ -2114,7 +2235,7 @@ function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which) {
     if (dmUrl && /^https?:\/\//i.test(dmUrl)) {
       const finalUrl = applyParams(dmUrl, translated, presetName);
       changes.push({ oldUrl: fullUrl, newUrl: finalUrl });
-      return `${quote}${finalUrl}${quote}`;
+      return delim + finalUrl;
     }
     unmatched.push(s7Key.trim());
     return match;
@@ -2176,6 +2297,42 @@ async function buildQaFixedZip(buffer, opts) {
   return { buf: await patch(outerAdm), changes, unmatched, pagesFixed };
 }
 
+// Pre-scan pass for the Fix flow: walks the Franklin pages (same inner/outer zip
+// handling as buildQaFixedZip) and returns the deduped list of /content/dam/ paths
+// that qaFixAssetRefs would otherwise report as unmatched — either missing from
+// pathMap entirely, or present but without a real DM URL yet. The path cleaning
+// (strip query/hash/rendition/coreimg suffix, then normalizeDamPrefix) mirrors
+// qaFixAssetRefs exactly so a path recovered here lands under the same pathMap key
+// qaFixAssetRefs will look up on this same Fix pass.
+function collectUnresolvedDamPaths(buffer, pathMap, damNorm, which) {
+  const outerAdm   = new AdmZip(buffer);
+  const innerEntry = outerAdm.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
+  const zip        = innerEntry ? new AdmZip(innerEntry.getData()) : outerAdm;
+  const found      = new Set();
+
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory || !entry.entryName.endsWith('.xml') || lcIsSkipped(entry.entryName)) continue;
+    let content;
+    try { content = entry.getData().toString('utf8'); } catch { continue; }
+    if (!isFranklinPage(content)) continue;
+
+    for (const url of extractLinks(franklinBlockRegion(content).region)) {
+      if (!url.startsWith('/content/dam/')) continue;
+      let cleanPath = url.split('?')[0].split('#')[0]
+        .replace(/\/_jcr_content\/renditions\/.*$/, '')
+        .replace(/\.coreimg.*$/, '');
+      if (damNorm) cleanPath = normalizeDamPrefix(cleanPath, damNorm.correctRoot, damNorm.oldRoots);
+      const lastSeg = cleanPath.split('/').pop() || '';
+      if (!lastSeg.includes('.')) continue;                 // extensionless → content fragment / structural node
+      const isPdf = /\.pdf$/i.test(lastSeg);
+      if (isPdf ? !which.pdf : !which.dam) continue;
+      const row = pathMap?.get(cleanPath);
+      if (!row || !/^https?:\/\//i.test(row.openApiUrl)) found.add(cleanPath);
+    }
+  }
+  return [...found];
+}
+
 // ── Fix: apply the QA fixes and return the patched ZIP + change report ────────
 app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, res) => {
   const { sessionId, siteRoot, env, internalDomains, checks } = req.body;
@@ -2188,7 +2345,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
   const needsCsv = sel.has('pdf') || sel.has('dam') || sel.has('scene7');
 
   try {
-    let pathMap = null, scene7Map = null, damNorm = null;
+    let pathMap = null, scene7Map = null, damNorm = null, se = null;
     if (needsCsv) {
       if (!env) return res.status(400).json({ error: 'Select a target environment for PDF / DAM / Scene7 → DM conversion.' });
       const file = csvPath(env);
@@ -2196,14 +2353,38 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
       const rows = parse(fs.readFileSync(file, 'utf8'), { columns: true, skip_empty_lines: true });
       pathMap   = new Map(rows.filter(r => r.path && r.openApiUrl).map(r => [r.path, r]));
       scene7Map = buildScene7LookupMap(rows);
-      const se  = loadSiteConfig().environments.find(e => e.name === env);
+      se        = loadSiteConfig().environments.find(e => e.name === env);
       damNorm   = { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
+    }
+
+    // Live AEM-author recovery: for any PDF/DAM ref the CSV can't resolve to a DM
+    // URL (missing row, or crawled before the asset was approved), check the asset
+    // directly on this environment's AEM author. A confirmed hit is written into
+    // `pathMap` (picked up by buildQaFixedZip below, same pass) and persisted back
+    // into the asset-map CSV so future Fix runs don't need to re-check AEM.
+    let recoveredPaths = new Set();
+    if (needsCsv && (sel.has('pdf') || sel.has('dam'))) {
+      const candidates = collectUnresolvedDamPaths(buffer, pathMap, damNorm, { pdf: sel.has('pdf'), dam: sel.has('dam') });
+      if (candidates.length) {
+        const recovered = await recoverDmUrlsFromAuthor(candidates, pathMap, {
+          aemUrl: se?.aemUrl, dmHost: se?.dmHost,
+          username: appConfig?.target?.username, password: appConfig?.target?.password,
+        }, msg => console.log('[link-checker fix]', msg));
+        if (recovered.length) {
+          persistRecoveredRows(env, recovered);
+          recoveredPaths = new Set(recovered.map(r => r.path));
+        }
+      }
     }
 
     const { buf, changes, unmatched, pagesFixed } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel });
     lcSessions.set(sessionId, buf);   // keep session, chained on the fixed result (enables per-category iteration + re-scan)
 
-    const reportRows = changes.map(c => ({ file: c.file, type: c.type, status: 'changed', oldUrl: c.oldUrl, newUrl: c.newUrl }));
+    const reportRows = changes.map(c => ({
+      file: c.file, type: c.type,
+      status: recoveredPaths.has(c.oldUrl.split('?')[0].split('#')[0]) ? 'changed (recovered from AEM author)' : 'changed',
+      oldUrl: c.oldUrl, newUrl: c.newUrl,
+    }));
     for (const u of unmatched) reportRows.push({ file: u.file, type: 'asset-dm', status: 'unmatched (no CSV entry)', oldUrl: u.url, newUrl: '' });
     const reportCsv = stringify(reportRows, { header: true, columns: [
       { key: 'file', header: 'file' }, { key: 'type', header: 'type' }, { key: 'status', header: 'status' },
@@ -2219,6 +2400,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
     res.setHeader('X-Pages-Fixed',  String(pagesFixed));
     res.setHeader('X-Change-Count', String(changes.length));
     res.setHeader('X-Unmatched',    String(unmatched.length));
+    res.setHeader('X-Recovered',    String(recoveredPaths.size));
     res.setHeader('X-Counts',       Buffer.from(JSON.stringify(counts)).toString('base64'));
     res.setHeader('X-Report-Id',    reportId);
     res.send(buf);
