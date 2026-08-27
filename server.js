@@ -2029,19 +2029,56 @@ function qaHost(url) {
   return m ? m[1].toLowerCase() : '';
 }
 
+// Attributes on the jcr:content start tag that must never be scanned/fixed: the page
+// template, tags, and MSM / language-copy references (cq:master/blueprint/source/live*)
+// that legitimately point at another locale's /content path. Everything else on that
+// tag — e.g. cardImage, cardTitle — is real authored content (set via the page's field
+// model) and must stay scannable, even though it lives as a tag attribute rather than
+// inside a child block node.
+const PROTECTED_JCR_CONTENT_ATTR_RE =
+  /((?:cq:template|cq:tags|cq:master\w*|cq:blueprint\w*|cq:source\w*|cq:live\w*|cq:relativePath)\s*=\s*)("[^"]*"|'[^']*')/g;
+
 // The authored-block region of a Franklin page .content.xml — everything INSIDE
-// <jcr:content ...> … </jcr:content>, EXCLUDING the page node's own properties (which
-// live as attributes on the jcr:content start tag: cq:template, cq:tags, and MSM /
-// language-copy references like cq:master/blueprint/source that can point at another
-// locale). Only real block content is scanned/fixed; page metadata is left intact.
-// Returns { before, region, after } for reassembly; falls back to the whole doc.
+// <jcr:content ...> … </jcr:content>, with the protected attribute VALUES on the
+// jcr:content start tag masked out (restored via unmaskProtected() after fixing).
+// Only the protected properties are left untouched; the rest of the tag (including
+// content fields like cardImage) is scanned/fixed like any other block content.
+// Returns { before, region, after, protectedVals } for reassembly; falls back to the
+// whole doc when no jcr:content tag is found.
 function franklinBlockRegion(xml) {
   const open  = xml.match(/<jcr:content(?:"[^"]*"|'[^']*'|[^>"'])*>/);
   const close = xml.lastIndexOf('</jcr:content>');
-  if (!open || close < 0) return { before: '', region: xml, after: '' };
+  if (!open || close < 0) return { before: '', region: xml, after: '', protectedVals: [] };
   const start = open.index + open[0].length;
-  if (close < start) return { before: '', region: xml, after: '' };
-  return { before: xml.slice(0, start), region: xml.slice(start, close), after: xml.slice(close) };
+  if (close < start) return { before: '', region: xml, after: '', protectedVals: [] };
+  const protectedVals = [];
+  const maskedOpenTag = open[0].replace(PROTECTED_JCR_CONTENT_ATTR_RE, (m, pre, val) => {
+    const token = ` P${protectedVals.length} `;
+    protectedVals.push(val);
+    return pre + token;
+  });
+  return {
+    before: xml.slice(0, open.index),
+    region: maskedOpenTag + xml.slice(start, close),
+    after: xml.slice(close),
+    protectedVals,
+  };
+}
+
+// Restore the values masked out by franklinBlockRegion() after the region has been
+// scanned/fixed — must be applied to `region`/`body` before reassembly.
+function unmaskProtected(text, protectedVals) {
+  if (!protectedVals || !protectedVals.length) return text;
+  return text.replace(/ P(\d+) /g, (m, i) => protectedVals[Number(i)]);
+}
+
+// A DAM asset ref may be written as a bare /content/dam/... path OR as an absolute
+// self-link (https://www.abbvie.com/content/dam/...) left over from the legacy site.
+// Both forms point at the same asset, so classification/fix/recovery all need to see
+// past the optional host prefix. Returns the bare /content/dam/... path, or null.
+function damPathOf(url) {
+  const m = url.match(/^(?:https?:\/\/[^/]+)?(\/content\/dam\/.*)$/i);
+  return m ? m[1] : null;
 }
 
 // Classify one extracted link for the QA report, given the package site root R.
@@ -2050,12 +2087,16 @@ function franklinBlockRegion(xml) {
 function qaClassify(url, siteRoot, pageIsLangMaster) {
   if (/delivery-p\d+-e\d+/i.test(url) || /\/adobe\/assets\//i.test(url)) return 'dm-ok';
   if (/\.scene7\.com|\/is\/(?:image|content)\//i.test(url))              return 'scene7';
-  if (/^https?:\/\//i.test(url))                                         return 'absolute';
-  if (url.startsWith('/content/dam/')) {
-    const last = url.split('?')[0].split('#')[0].split('/').pop() || '';
+  const damPath = damPathOf(url);
+  if (damPath) {
+    const cleanPath = damPath.split('?')[0].split('#')[0]
+      .replace(/\/_jcr_content\/renditions\/.*$/, '')
+      .replace(/\.coreimg.*$/, '');
+    const last = cleanPath.split('/').pop() || '';
     if (!last.includes('.')) return 'dam-cf';                 // extensionless → content fragment / structural node, not a deliverable asset
     return /\.pdf$/i.test(last) ? 'pdf-dam' : 'dam-asset';
   }
+  if (/^https?:\/\//i.test(url))                                         return 'absolute';
   if (url.startsWith('/content/')) {
     if (pageIsLangMaster && /\/language-masters\//i.test(url)) return 'internal-ok';   // blueprint PAGE linking to blueprint content is fine; on a live page a language-masters link is still flagged
     return (siteRoot && (url === siteRoot || url.startsWith(siteRoot + '/'))) ? 'internal-ok' : 'cross-locale';
@@ -2065,8 +2106,10 @@ function qaClassify(url, siteRoot, pageIsLangMaster) {
 }
 
 // Default guess for which absolute domains are "internal" (a migration mistake to fix)
-// vs genuinely external. The user can override each in the UI.
-const qaGuessInternal = h => /(^|\.)abbvie\.|adobeaemcloud\.com$|(^|\.)adobe\.com$/i.test(h);
+// vs genuinely external. Only the legacy site's own domain is guessed internal by
+// default — every other absolute host (careers.abbvie.com, third-party job boards,
+// adobeaemcloud.com, etc.) defaults to external. The user can override each in the UI.
+const qaGuessInternal = h => /^www\.abbvie\.com$/i.test(h);
 
 // ── Analyze: the 5-check migration-QA rollup ──────────────────────────────────
 app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res) => {
@@ -2198,14 +2241,18 @@ function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which) {
   // value) are XML-escaped, so the boundary around the path is literally "&quot;", not
   // a bare quote character. '&' is excluded from the path body so that boundary always
   // terminates the match instead of being swallowed into the captured path.
-  let content = xml.replace(/(["'=]|&quot;)(\/content\/dam\/[^"'<>\s&]*)/g, (match, delim, rawPath) => {
-    const qIdx        = rawPath.indexOf('?');
-    const queryString = (qIdx !== -1 ? rawPath.slice(qIdx + 1) : '').replace(/&amp;/g, '&');
+  // The DAM ref itself may carry an optional absolute-host prefix (a legacy hardcoded
+  // https://www.abbvie.com/content/dam/... self-link) — matched and replaced whole,
+  // same as damPathOf() does for classification/recovery.
+  let content = xml.replace(/(["'=]|&quot;)((?:https?:\/\/[^/"'<>\s&]+)?\/content\/dam\/[^"'<>\s&]*)/g, (match, delim, rawUrl) => {
+    const qIdx        = rawUrl.indexOf('?');
+    const queryString = (qIdx !== -1 ? rawUrl.slice(qIdx + 1) : '').replace(/&amp;/g, '&');
     const presetMatch = queryString.match(/\$([^$]+)\$/);
     const presetName  = presetMatch ? presetMatch[1] : '';
     const modifierStr = queryString.replace(/\$[^$]+\$/g, '').replace(/^&+|&+$/g, '').replace(/&&+/g, '&');
     const translated  = translateModifiers(modifierStr);
-    let cleanPath = rawPath.split('?')[0].split('#')[0]
+    let cleanPath = rawUrl.split('?')[0].split('#')[0]
+      .replace(/^https?:\/\/[^/]+/i, '')                      // strip a same-site absolute host prefix, if any
       .replace(/\/_jcr_content\/renditions\/.*$/, '')
       .replace(/\.coreimg.*$/, '');
     if (damNorm) cleanPath = normalizeDamPrefix(cleanPath, damNorm.correctRoot, damNorm.oldRoots);
@@ -2216,12 +2263,12 @@ function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which) {
     const row = pathMap && pathMap.get(cleanPath);
     if (row) {
       if (row.isCF === 'true') return match;                      // content fragment — leave unchanged
-      if (!/^https?:\/\//i.test(row.openApiUrl)) { unmatched.push(rawPath); return match; }  // not on DM yet
+      if (!/^https?:\/\//i.test(row.openApiUrl)) { unmatched.push(rawUrl); return match; }  // not on DM yet
       const finalUrl = applyParams(row.openApiUrl, translated, presetName);
-      changes.push({ oldUrl: rawPath, newUrl: finalUrl });
+      changes.push({ oldUrl: rawUrl, newUrl: finalUrl });
       return delim + finalUrl;
     }
-    unmatched.push(rawPath);
+    unmatched.push(rawUrl);
     return match;
   });
 
@@ -2265,11 +2312,12 @@ async function buildQaFixedZip(buffer, opts) {
         const before = e.getData().toString('utf8');
         if (isFranklinPage(before)) {
           const file = name.replace(/^jcr_root/, '');
-          const { before: pre, region, after: post } = franklinBlockRegion(before);
-          let body = region;   // fix only the authored blocks; page-node properties stay untouched
+          const { before: pre, region, after: post, protectedVals } = franklinBlockRegion(before);
+          let body = region;   // fix authored blocks + content fields; cq:template/tags/MSM refs stay masked
           const a = sel.has('absolute') ? qaFixAbsolute(body, siteRoot, internalHosts, damNorm) : { result: body, changes: [] };            body = a.result;
           const b = doAsset             ? qaFixAssetRefs(body, pathMap, scene7Map, damNorm, assetWhich) : { result: body, changes: [], unmatched: [] }; body = b.result;
           const c = sel.has('shortPath') ? qaFixShortPaths(body, siteRoot) : { result: body, changes: [] };                                  body = c.result;
+          body = unmaskProtected(body, protectedVals);   // restore cq:template/tags/MSM refs before writing back
           const after = pre + body + post;
           for (const ch of a.changes) changes.push({ file, type: 'absolute',   ...ch });
           for (const ch of b.changes) changes.push({ file, type: 'asset-dm',   ...ch });
@@ -2317,8 +2365,9 @@ function collectUnresolvedDamPaths(buffer, pathMap, damNorm, which) {
     if (!isFranklinPage(content)) continue;
 
     for (const url of extractLinks(franklinBlockRegion(content).region)) {
-      if (!url.startsWith('/content/dam/')) continue;
-      let cleanPath = url.split('?')[0].split('#')[0]
+      const damPath = damPathOf(url);
+      if (!damPath) continue;
+      let cleanPath = damPath.split('?')[0].split('#')[0]
         .replace(/\/_jcr_content\/renditions\/.*$/, '')
         .replace(/\.coreimg.*$/, '');
       if (damNorm) cleanPath = normalizeDamPrefix(cleanPath, damNorm.correctRoot, damNorm.oldRoots);
