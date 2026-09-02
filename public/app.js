@@ -1267,9 +1267,11 @@ function lcOnFileSelected(input) {
   document.getElementById('lcUploadTitle').textContent = file.name;
   document.getElementById('lcUploadSub').textContent   = `${(file.size / 1024 / 1024).toFixed(2)} MB — click to change`;
   document.getElementById('lcScanBtn').disabled = false;
+  document.getElementById('lcReportBtn').disabled = true;   // enabled only after a successful Scan
   document.getElementById('lcResetBtn').style.display = '';
   document.getElementById('lcStatus').textContent = '';
   document.getElementById('lcReport').style.display = 'none';
+  document.getElementById('lcReportPanel').style.display = 'none';
 }
 
 function lcReset() {
@@ -1279,8 +1281,10 @@ function lcReset() {
   document.getElementById('lcUploadTitle').textContent = 'Click to browse for a content-package ZIP';
   document.getElementById('lcUploadSub').textContent   = 'AEM package ZIP (nested or flat)';
   document.getElementById('lcScanBtn').disabled = true;
+  document.getElementById('lcReportBtn').disabled = true;
   document.getElementById('lcResetBtn').style.display = 'none';
   document.getElementById('lcReport').style.display = 'none';
+  document.getElementById('lcReportPanel').style.display = 'none';
   document.getElementById('lcStatus').textContent = '';
 }
 
@@ -1327,6 +1331,7 @@ async function lcScan() {
     if (!res.ok) throw new Error(data.error || 'Scan failed');
     lcAnalysis = data;
     lcRenderReport(data);
+    document.getElementById('lcReportBtn').disabled = false;   // Scan done → Report available
   } catch (e) { alert(e.message); }
   finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-search me-2"></i>Scan'; }
 }
@@ -1392,7 +1397,37 @@ function lcRenderReport(data) {
 
   lcRenderCrossLocale();
   lcRenderAbsolute();
+  lcRenderUnresolvedAssets(data);
   document.getElementById('lcReport').style.display = '';
+}
+
+// Assets the asset-map can't resolve — author pastes a DM URL for each; Fix all applies them.
+function lcRenderUnresolvedAssets(data) {
+  const card = document.getElementById('lcUnresolvedCard');
+  const list = (data.unresolvedAssets || []);
+  if (!list.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  document.getElementById('lcUnresolvedCount').textContent = list.length;
+  document.getElementById('lcUnresolvedBody').innerHTML = list.map(a => `
+    <div class="mb-2">
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span class="badge bg-light text-dark border">${escHtml(a.check)}</span>
+        <span class="badge bg-warning">${escHtml(a.verdict)}</span>
+        <span class="text-muted small">${a.count} ref(s)</span>
+      </div>
+      <div class="input-group input-group-sm mt-1" style="max-width:720px">
+        <span class="input-group-text" title="asset reference" style="max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><code>${escHtml(a.current)}</code></span>
+        <input type="text" class="form-control lc-cmap" data-from="${escHtml(a.current)}" placeholder="paste the DM Open API URL" />
+      </div>
+    </div>`).join('') +
+    '<div class="form-text">Leave blank to skip. Filled rows are applied when you click Fix all (or any asset Fix).</div>';
+}
+
+// Author-supplied asset mappings from the Unresolved assets card → [{from, to}].
+function lcCustomAssetMappings() {
+  return [...document.querySelectorAll('#lcUnresolvedBody .lc-cmap')]
+    .map(i => ({ from: i.dataset.from, to: i.value.trim() }))
+    .filter(m => m.from && m.to);
 }
 
 // Cross-locale links, grouped by source locale. Each group: a checkbox, a count, the
@@ -1523,6 +1558,7 @@ async function lcFix(checks) {
                                     : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7'];
     const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel };
     if (sel.includes('crossLocale')) body.crossLocaleMappings = mappings;
+    if (sel.some(c => c === 'pdf' || c === 'dam' || c === 'scene7')) body.customAssetMappings = lcCustomAssetMappings();
     const res = await fetch('/api/link-checker/fix', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
@@ -1544,6 +1580,86 @@ async function lcFix(checks) {
     // Re-scan to refresh counts — the session buffer now holds the fixed result.
     await lcScan();
   } catch (e) { status.className = 'small mt-2 text-danger'; status.textContent = e.message; }
+}
+
+// ─── Migration QA report (dry-run preview) ────────────────────────────────────
+let lcReportData = null;
+let lcReportFilterCls = 'all';
+
+const LC_VERDICT = {
+  fix:  { label: 'Will fix',        badge: 'bg-success'   },
+  ok:   { label: 'Already ok',      badge: 'bg-secondary' },
+  warn: { label: 'Needs attention', badge: 'bg-warning'   },
+  cant: { label: "Can't fix",       badge: 'bg-danger'    },
+  skip: { label: 'Skipped',         badge: 'bg-secondary' },
+};
+
+async function lcReport() {
+  if (!lcFile) return;
+  const siteRoot = document.getElementById('lcSiteRoot').value.trim();
+  if (!siteRoot.startsWith('/content/')) { alert('Enter a valid site root starting with /content/'); return; }
+  const env = document.getElementById('lcEnv').value;
+  const btn = document.getElementById('lcReportBtn'); btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Reporting...';
+  try {
+    await lcEnsureSession();
+    const res  = await fetch('/api/link-checker/report', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Report failed');
+    lcReportData = data;
+    lcReportFilterCls = 'all';
+    lcRenderReportPanel();
+  } catch (e) { alert(e.message); }
+  finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-file-earmark-text me-2"></i>Report'; }
+}
+
+function lcSetReportFilter(cls) { lcReportFilterCls = cls; lcRenderReportPanel(); }
+
+function lcRenderReportPanel() {
+  const d = lcReportData; if (!d) return;
+  const s = d.summary;
+  document.getElementById('lcReportPanel').style.display = '';
+
+  const chip = (cls, label, n) =>
+    `<button class="btn btn-sm ${lcReportFilterCls === cls ? 'btn-dark' : 'btn-outline-secondary'}" onclick="lcSetReportFilter('${cls}')">${label} <span class="badge ${cls === 'all' ? 'bg-secondary' : LC_VERDICT[cls].badge} ms-1">${n}</span></button>`;
+  const chips = chip('all', 'All', s.fix + s.ok + s.warn + s.cant + s.skip) +
+    ['fix', 'ok', 'warn', 'cant', 'skip'].map(c => chip(c, LC_VERDICT[c].label, s[c] || 0)).join('');
+
+  const rows = d.rows.filter(r => lcReportFilterCls === 'all' || r.cls === lcReportFilterCls);
+  const rowHtml = rows.map(r => {
+    const newLine = r.newUrl
+      ? `<div class="small"><i class="bi bi-arrow-return-right text-muted me-1"></i><code class="text-success" style="word-break:break-all">${escHtml(r.newUrl)}</code></div>`
+      : `<div class="small text-muted"><i class="bi bi-arrow-return-right me-1"></i>${r.cls === 'cant' ? "— can't fix —" : (r.cls === 'skip' ? 'unchanged' : '— review —')}</div>`;
+    return `<div class="py-2 border-top">
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span class="badge bg-light text-dark border">${escHtml(r.check)}</span>
+        <span class="badge ${LC_VERDICT[r.cls].badge}">${escHtml(r.verdict)}</span>
+        <span class="text-muted small ms-auto">${r.count} ref(s) · ${r.files} page(s)</span>
+      </div>
+      <div class="small mt-1"><code class="text-muted" style="word-break:break-all">${escHtml(r.current)}</code></div>
+      ${newLine}
+    </div>`;
+  }).join('') || '<div class="text-muted small py-2">No references in this category.</div>';
+
+  document.getElementById('lcReportBody').innerHTML =
+    `<div class="text-muted small mb-2">Scanned <strong>${d.pagesScanned}</strong> Franklin page(s). Site root <code>${escHtml(d.siteRoot)}</code>.${d.env ? ` Env <strong>${escHtml(d.env)}</strong>${d.csvExists ? '' : ' <span class="text-danger">(no CSV — asset verdicts limited)</span>'}.` : ' <span class="text-warning">No env selected — asset verdicts limited.</span>'}</div>
+     <div class="d-flex gap-2 flex-wrap mb-3">${chips}</div>
+     <div style="max-height:540px;overflow:auto">${rowHtml}</div>`;
+}
+
+function lcReportCsv() {
+  if (!lcReportData) return;
+  const esc = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  const header = ['check', 'verdict', 'current', 'new', 'refs', 'pages', 'sample_page'];
+  const lines = [header.join(',')].concat(lcReportData.rows.map(r =>
+    [r.check, r.verdict, r.current, r.newUrl, r.count, r.files, (r.sample && r.sample[0]) || ''].map(esc).join(',')));
+  const blob = new Blob([lines.join('\r\n')], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'qa-report.csv'; a.click();
+  URL.revokeObjectURL(url);
 }
 
 document.addEventListener('DOMContentLoaded', lcInit);

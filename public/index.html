@@ -814,6 +814,9 @@
           <button class="btn btn-primary" id="lcScanBtn" onclick="lcScan()" disabled>
             <i class="bi bi-search me-2"></i>Scan
           </button>
+          <button class="btn btn-outline-primary" id="lcReportBtn" onclick="lcReport()" disabled>
+            <i class="bi bi-file-earmark-text me-2"></i>Report
+          </button>
           <button class="btn btn-outline-secondary" id="lcResetBtn" onclick="lcReset()" style="display:none">
             <i class="bi bi-x me-1"></i>Reset
           </button>
@@ -823,6 +826,15 @@
     </div>
 
     <!-- Report -->
+    <div id="lcReportPanel" class="card mb-3" style="display:none;border-left:4px solid #6610f2">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="bi bi-file-earmark-text text-primary"></i><strong>Migration QA report</strong>
+        <span class="text-muted small ms-1">— every reference and what a fix would do (preview only, nothing changes)</span>
+        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="lcReportCsv()"><i class="bi bi-download me-1"></i>Download CSV</button>
+      </div>
+      <div class="card-body" id="lcReportBody"></div>
+    </div>
+
     <div id="lcReport" style="display:none">
       <div class="card mb-3" style="border-left:4px solid #0d6efd">
         <div class="card-body">
@@ -859,6 +871,16 @@
           <span class="text-muted small ms-1">— full paths under a different locale, grouped by source. Tick a group and set the target root to re-point them; untick intentional ones.</span>
         </div>
         <div class="card-body" id="lcCrossList"></div>
+      </div>
+
+      <!-- unresolved assets — author-supplied DM URLs (applied by Fix all) -->
+      <div class="card mb-3" id="lcUnresolvedCard" style="display:none;border-left:4px solid #dc3545">
+        <div class="card-header d-flex align-items-center gap-2">
+          <i class="bi bi-patch-question text-danger"></i><strong>Unresolved assets</strong>
+          <span class="badge bg-danger ms-1" id="lcUnresolvedCount">0</span>
+          <span class="text-muted small ms-1">— not in the asset-map. Paste the DM Open API URL for each; Fix all will apply them.</span>
+        </div>
+        <div class="card-body" id="lcUnresolvedBody"></div>
       </div>
     </div>
 

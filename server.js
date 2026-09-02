@@ -2161,6 +2161,17 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
     const domains = new Map();   // host -> { count, files:Set }
     let pagesScanned = 0, xmlTotal = 0;
 
+    // Load the env asset-map (if any) so we can flag which DAM/PDF/Scene7 refs are unresolved.
+    let pathMap = null, scene7Map = null, damNorm = null;
+    if (env && fs.existsSync(csvPath(env))) {
+      const csvRows = parse(fs.readFileSync(csvPath(env), 'utf8'), { columns: true, skip_empty_lines: true });
+      pathMap   = new Map(csvRows.filter(r => r.path && r.openApiUrl).map(r => [r.path, r]));
+      scene7Map = buildScene7LookupMap(csvRows);
+      const se  = loadSiteConfig().environments.find(e => e.name === env);
+      damNorm   = { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
+    }
+    const unresolvedAssets = new Map();   // ref -> { current, check, verdict, count }
+
     const addEx = (c, file, url) => { c.count++; c.files.add(file); c.examples.push({ file, url }); };   // return all (client lists/filters them)
 
     for (const entry of zip.getEntries()) {
@@ -2190,6 +2201,15 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
           addEx(checks.absolute, file, url);
           if (!domains.has(host)) domains.set(host, { count: 0, files: new Set() });
           const d = domains.get(host); d.count++; d.files.add(file);
+        }
+
+        // Flag DAM/PDF/Scene7 refs the asset-map can't resolve (need a manual DM URL before Fix).
+        if (pathMap && (kind === 'scene7' || kind === 'pdf-dam' || kind === 'dam-asset')) {
+          const rr = qaResolveLink(url, { R, pathMap, scene7Map, damNorm, pageIsLM, pageLocaleRoot: null, localeRoots });
+          if (rr && !rr.newUrl && (rr.cls === 'cant' || rr.cls === 'warn')) {
+            if (!unresolvedAssets.has(url)) unresolvedAssets.set(url, { current: url, check: rr.check, verdict: rr.verdict, count: 0 });
+            unresolvedAssets.get(url).count++;
+          }
         }
       }
     }
@@ -2223,6 +2243,7 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
         .map(([host, d]) => ({ host, count: d.count, files: d.files.size, guessInternal: qaGuessInternal(host) }))
         .sort((a, b) => b.count - a.count),
       crossLocale: { count: crossCount, files: crossFilesSet.size, groups: crossGroupsArr, unresolved: pack(crossUnresolved) },
+      unresolvedAssets: [...unresolvedAssets.values()].sort((a, b) => b.count - a.count),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2306,7 +2327,7 @@ function qaFixAbsolute(xml, R, internalHosts, damNorm) {
 // /content/dam refs and absolute scene7.com URLs → DM Open API URLs, via the asset-map.
 // Ported from the Image tool's update-zip: preset/modifier translation, isCF skip,
 // DAM prefix normalization. pathMap = path→row(full); scene7Map = key→openApiUrl.
-function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which) {
+function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which, customMap) {
   const w = which || { pdf: true, dam: true, scene7: true };
   const changes = [], unmatched = [];
   const applyParams = (baseUrl, translated, preset) => {
@@ -2358,6 +2379,12 @@ function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which) {
       changes.push({ oldUrl: rawUrl, newUrl: finalUrl });
       return delim + finalUrl;
     }
+    const custom = customMap && (customMap.get(rawUrl) || customMap.get(cleanPath));   // author-supplied DM URL
+    if (custom && /^https?:\/\//i.test(custom)) {
+      const finalUrl = applyParams(custom, translated, presetName);
+      changes.push({ oldUrl: rawUrl, newUrl: finalUrl });
+      return delim + finalUrl;
+    }
     unmatched.push(rawUrl);
     return match;
   });
@@ -2371,6 +2398,12 @@ function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which) {
     const dmUrl = scene7Map && scene7Map.get(s7Key.trim().toLowerCase());
     if (dmUrl && /^https?:\/\//i.test(dmUrl)) {
       const finalUrl = applyParams(dmUrl, translated, presetName);
+      changes.push({ oldUrl: fullUrl, newUrl: finalUrl });
+      return delim + finalUrl;
+    }
+    const custom = customMap && (customMap.get(fullUrl) || customMap.get(s7Key.trim()));   // author-supplied DM URL
+    if (custom && /^https?:\/\//i.test(custom)) {
+      const finalUrl = applyParams(custom, translated, presetName);
       changes.push({ oldUrl: fullUrl, newUrl: finalUrl });
       return delim + finalUrl;
     }
@@ -2388,6 +2421,7 @@ async function buildQaFixedZip(buffer, opts) {
   const sel        = opts.checks || new Set(['shortPath', 'absolute', 'pdf', 'dam', 'scene7']);
   const assetWhich = { pdf: sel.has('pdf'), dam: sel.has('dam'), scene7: sel.has('scene7') };
   const doAsset    = assetWhich.pdf || assetWhich.dam || assetWhich.scene7;
+  const customMap  = new Map((opts.customAssetMappings || []).filter(m => m && m.from && m.to).map(m => [m.from, m.to]));
   const outerAdm   = new AdmZip(buffer);
   const innerEntry = outerAdm.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
   const changes = [], unmatched = [];
@@ -2405,7 +2439,7 @@ async function buildQaFixedZip(buffer, opts) {
           const { before: pre, region, after: post, protectedVals } = franklinBlockRegion(before);
           let body = region;   // fix authored blocks + content fields; cq:template/tags/MSM refs stay masked
           const a = sel.has('absolute') ? qaFixAbsolute(body, siteRoot, internalHosts, damNorm) : { result: body, changes: [] };            body = a.result;
-          const b = doAsset             ? qaFixAssetRefs(body, pathMap, scene7Map, damNorm, assetWhich) : { result: body, changes: [], unmatched: [] }; body = b.result;
+          const b = doAsset             ? qaFixAssetRefs(body, pathMap, scene7Map, damNorm, assetWhich, customMap) : { result: body, changes: [], unmatched: [] }; body = b.result;
           const c = sel.has('shortPath') ? qaFixShortPaths(body, siteRoot) : { result: body, changes: [] };                                  body = c.result;
           const pageLocale = qaLocaleRootOf(file, siteRoot);
           const x = (sel.has('crossLocale') && crossLocaleMappings?.length) ? qaFixCrossLocale(body, crossLocaleMappings, pageLocale) : { result: body, changes: [] }; body = x.result;
@@ -2496,17 +2530,25 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
     return res.status(400).json({ error: 'No cross-locale groups selected (tick a group and enter a target path).' });
   }
 
+  // Author-supplied asset mappings: [{from, to}] — from = the asset ref as found, to = a DM URL.
+  // Used when the asset-map CSV has no entry for a reference.
+  const customAssetMappings = (Array.isArray(req.body.customAssetMappings) ? req.body.customAssetMappings : [])
+    .filter(m => m && typeof m.from === 'string' && typeof m.to === 'string' && m.from && /^https?:\/\//i.test(m.to));
+
   try {
     let pathMap = null, scene7Map = null, damNorm = null, se = null;
     if (needsCsv) {
-      if (!env) return res.status(400).json({ error: 'Select a target environment for PDF / DAM / Scene7 → DM conversion.' });
-      const file = csvPath(env);
-      if (!fs.existsSync(file)) return res.status(400).json({ error: `No asset-map CSV for environment "${env}". Build it in the Image/Asset tool first.` });
-      const rows = parse(fs.readFileSync(file, 'utf8'), { columns: true, skip_empty_lines: true });
-      pathMap   = new Map(rows.filter(r => r.path && r.openApiUrl).map(r => [r.path, r]));
-      scene7Map = buildScene7LookupMap(rows);
-      se        = loadSiteConfig().environments.find(e => e.name === env);
-      damNorm   = { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
+      if (env && fs.existsSync(csvPath(env))) {
+        const rows = parse(fs.readFileSync(csvPath(env), 'utf8'), { columns: true, skip_empty_lines: true });
+        pathMap   = new Map(rows.filter(r => r.path && r.openApiUrl).map(r => [r.path, r]));
+        scene7Map = buildScene7LookupMap(rows);
+        se        = loadSiteConfig().environments.find(e => e.name === env);
+      } else if (!customAssetMappings.length) {
+        return res.status(400).json({ error: env
+          ? `No asset-map CSV for environment "${env}". Build it in the Image/Asset tool first, or add custom asset mappings.`
+          : 'Select a target environment (or add custom asset mappings) for PDF / DAM / Scene7 → DM conversion.' });
+      }
+      damNorm = { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
     }
 
     // Live AEM-author recovery: for any PDF/DAM ref the CSV can't resolve to a DM
@@ -2515,7 +2557,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
     // `pathMap` (picked up by buildQaFixedZip below, same pass) and persisted back
     // into the asset-map CSV so future Fix runs don't need to re-check AEM.
     let recoveredPaths = new Set();
-    if (needsCsv && (sel.has('pdf') || sel.has('dam'))) {
+    if (needsCsv && pathMap && (sel.has('pdf') || sel.has('dam'))) {
       const candidates = collectUnresolvedDamPaths(buffer, pathMap, damNorm, { pdf: sel.has('pdf'), dam: sel.has('dam') });
       if (candidates.length) {
         const recovered = await recoverDmUrlsFromAuthor(candidates, pathMap, {
@@ -2529,7 +2571,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
       }
     }
 
-    const { buf, changes, unmatched, pagesFixed } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings });
+    const { buf, changes, unmatched, pagesFixed } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings });
     lcSessions.set(sessionId, buf);   // keep session, chained on the fixed result (enables per-category iteration + re-scan)
 
     const reportRows = changes.map(c => ({
@@ -2681,6 +2723,110 @@ async function headCheckReport(reportRows, cfg) {
   }
   return { checked: jobs.length, notFound, errors };
 }
+
+// ── Migration QA report: per-reference verdict (dry-run of the fixers) ─────────
+// Returns { check, newUrl, verdict, cls } for one link, or null if it's a correct
+// internal link / not a reportable reference. cls ∈ fix|ok|warn|cant|skip.
+function qaResolveLink(url, ctx) {
+  const { R, pathMap, scene7Map, damNorm, pageIsLM, pageLocaleRoot, localeRoots } = ctx;
+  const norm = p => damNorm ? normalizeDamPrefix(p, damNorm.correctRoot, damNorm.oldRoots) : p;
+  const kind = qaClassify(url, R, pageIsLM);
+
+  if (kind === 'dm-ok')  return { check: 'dm',               newUrl: '', verdict: 'already on DM',    cls: 'ok'   };
+  if (kind === 'dam-cf') return { check: 'content-fragment', newUrl: '', verdict: 'kept as DAM path', cls: 'skip' };
+
+  if (kind === 'scene7') {
+    const m = url.match(/\/is\/(?:image|content)\/([^?"'<>\s]+)/i);
+    const dm = m && scene7Map ? scene7Map.get(m[1].trim().toLowerCase()) : null;
+    if (dm && /^https?:\/\//i.test(dm)) return { check: 'scene7', newUrl: dm, verdict: 'convertible', cls: 'fix' };
+    return { check: 'scene7', newUrl: '', verdict: 'not in asset-map', cls: 'cant' };
+  }
+
+  if (kind === 'pdf-dam' || kind === 'dam-asset') {
+    const check = kind === 'pdf-dam' ? 'pdf' : 'dam-asset';
+    const corrupted = /(?:%20|\s)/.test(url);
+    const damPath = damPathOf(url);
+    if (!damPath || !pathMap) return { check, newUrl: '', verdict: 'not in asset-map', cls: 'cant' };
+    const base = damPath.split('?')[0].split('#')[0].replace(/\/_jcr_content\/renditions\/.*$/, '').replace(/\.coreimg.*$/, '');
+    let row = pathMap.get(norm(base)) || pathMap.get(norm(base.replace(/(?:%20|\s)+/gi, '/')));
+    if (!row) return { check, newUrl: '', verdict: 'not in asset-map', cls: 'cant' };
+    if (row.isCF === 'true') return { check: 'content-fragment', newUrl: '', verdict: 'kept as DAM path', cls: 'skip' };
+    if (!/^https?:\/\//i.test(row.openApiUrl)) return { check, newUrl: '', verdict: 'unapproved — no DM URL', cls: 'warn' };
+    return { check, newUrl: row.openApiUrl, verdict: corrupted ? 'corrupted path — repaired' : 'convertible', cls: corrupted ? 'warn' : 'fix' };
+  }
+
+  if (kind === 'absolute') {
+    const host = qaHost(url);
+    if (qaGuessInternal(host)) {
+      const tail = (url.replace(/^https?:\/\/[^/]+/i, '').replace(/\.html?$/i, '') || '/');
+      return { check: 'absolute', newUrl: tail.startsWith('/content/') ? tail : joinWithPrefix(R, tail), verdict: 'will fix', cls: 'fix' };
+    }
+    return { check: 'absolute', newUrl: '', verdict: 'external — kept', cls: 'skip' };
+  }
+
+  if (kind === 'short-path') return { check: 'short-path', newUrl: joinWithPrefix(R, url.replace(/\.html?$/i, '')), verdict: 'will fix', cls: 'fix' };
+
+  if (kind === 'cross-locale') {
+    const src = qaSourceRoot(url, localeRoots) || qaLocaleRootOf(url, R);
+    if (!src) return { check: 'cross-locale', newUrl: '', verdict: 'review — no source root', cls: 'warn' };
+    return { check: 'cross-locale', newUrl: (pageLocaleRoot || R) + url.slice(src.length), verdict: 'will fix (default target)', cls: 'fix' };
+  }
+
+  return null;   // internal-ok / other → correct or not a reportable reference
+}
+
+app.post('/api/link-checker/report', express.json({ limit: '1mb' }), (req, res) => {
+  const { sessionId, siteRoot, env } = req.body;
+  const buffer = lcSessions.get(sessionId);
+  if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
+  if (!siteRoot || !siteRoot.startsWith('/content/')) return res.status(400).json({ error: 'Enter a valid site root.' });
+  const R = siteRoot.replace(/\/$/, '');
+
+  try {
+    let pathMap = null, scene7Map = null, damNorm = null;
+    if (env && fs.existsSync(csvPath(env))) {
+      const rows = parse(fs.readFileSync(csvPath(env), 'utf8'), { columns: true, skip_empty_lines: true });
+      pathMap   = new Map(rows.filter(r => r.path && r.openApiUrl).map(r => [r.path, r]));
+      scene7Map = buildScene7LookupMap(rows);
+      const se  = loadSiteConfig().environments.find(e => e.name === env);
+      damNorm   = { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
+    }
+    const localeRoots = loadLocaleRoots();
+
+    const outer = new AdmZip(buffer);
+    const inner = outer.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
+    const zip   = inner ? new AdmZip(inner.getData()) : outer;
+
+    const agg = new Map();
+    const summary = { fix: 0, ok: 0, warn: 0, cant: 0, skip: 0 };
+    let pagesScanned = 0;
+    for (const entry of zip.getEntries()) {
+      if (entry.isDirectory || !entry.entryName.endsWith('.xml')) continue;
+      let content; try { content = entry.getData().toString('utf8'); } catch { continue; }
+      if (!isFranklinPage(content) || lcIsSkipped(entry.entryName)) continue;
+      pagesScanned++;
+      const file = entry.entryName.replace(/^jcr_root/, '');
+      const ctx = { R, pathMap, scene7Map, damNorm, pageIsLM: /\/language-masters\//i.test(entry.entryName), pageLocaleRoot: qaLocaleRootOf(file, R), localeRoots };
+      for (const url of extractLinks(franklinBlockRegion(content).region)) {
+        const r = qaResolveLink(url, ctx);
+        if (!r) continue;
+        summary[r.cls]++;
+        const key = r.check + '|' + url + '|' + r.newUrl + '|' + r.verdict;
+        if (!agg.has(key)) agg.set(key, { check: r.check, current: url, newUrl: r.newUrl, verdict: r.verdict, cls: r.cls, count: 0, pages: new Set() });
+        const a = agg.get(key); a.count++; a.pages.add(file);
+      }
+    }
+
+    const order = { cant: 0, warn: 1, fix: 2, skip: 3, ok: 4 };
+    const rows = [...agg.values()]
+      .map(a => ({ check: a.check, current: a.current, newUrl: a.newUrl, verdict: a.verdict, cls: a.cls, count: a.count, files: a.pages.size, sample: [...a.pages].slice(0, 3) }))
+      .sort((x, y) => (order[x.cls] - order[y.cls]) || (y.count - x.count));
+
+    res.json({ siteRoot: R, env: env || '', csvExists: !!pathMap, pagesScanned, summary, total: rows.length, rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ── Download the change report from the last fix ──────────────────────────────
 app.get('/api/link-checker/fix-report/:id', (req, res) => {
