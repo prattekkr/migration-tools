@@ -1835,6 +1835,7 @@ function lcIsSkipped(name) {
   if (segs[segs.length - 1] === 'redirects.xml' || segs[segs.length - 1] === 'filter.xml') return true;
   if (segs.includes('redirects')) return true;
   if (segs.includes('config')) return true;
+  if (segs.includes('drafts') || segs.includes('draft') || segs.includes('preview')) return true;   // test/draft pages — not real content
   return false;
 }
 
@@ -2077,7 +2078,12 @@ function unmaskProtected(text, protectedVals) {
 // Both forms point at the same asset, so classification/fix/recovery all need to see
 // past the optional host prefix. Returns the bare /content/dam/... path, or null.
 function damPathOf(url) {
-  const m = url.match(/^(?:https?:\/\/[^/]+)?(\/content\/dam\/.*)$/i);
+  // Repair segment-leading space / %20 corruption (e.g. "/content/ dam/ abbvie-com2/…"
+  // or "/content/%20dam/%20abbvie-com2/…") so mangled DAM refs are still recognized as
+  // DAM assets rather than misfiled as cross-locale. Only whitespace/%20 immediately
+  // after a "/" is stripped, so genuine spaces inside a filename are preserved.
+  const repaired = url.replace(/\/(?:%20|\s)+/gi, '/');
+  const m = repaired.match(/^(?:https?:\/\/[^/]+)?(\/content\/dam\/.*)$/i);
   return m ? m[1] : null;
 }
 
@@ -2111,6 +2117,27 @@ function qaClassify(url, siteRoot, pageIsLangMaster) {
 // adobeaemcloud.com, etc.) defaults to external. The user can override each in the UI.
 const qaGuessInternal = h => /^www\.abbvie\.com$/i.test(h);
 
+// All valid locale roots from site.config.json — both live-copy and blueprint/language-
+// masters roots across every locale — deduped and sorted longest-first (most specific
+// prefix wins). This is the authoritative source for a cross-locale link's source-locale
+// prefix, correctly encoding the 1-vs-2-segment depth variance. Mirrors getDomainForLocale.
+function loadLocaleRoots() {
+  const { locales = [] } = loadSiteConfig();
+  const roots = new Set();
+  for (const l of locales) {
+    for (const r of [l.liveCopyPath, l.blueprintPath].filter(Boolean)) roots.add(r.replace(/\/$/, ''));
+  }
+  return [...roots].sort((a, b) => b.length - a.length);
+}
+
+// Longest known locale root that prefixes `url`, or null.
+function qaSourceRoot(url, localeRoots) {
+  for (const root of localeRoots) {
+    if (url === root || url.startsWith(root + '/')) return root;
+  }
+  return null;
+}
+
 // ── Analyze: the 5-check migration-QA rollup ──────────────────────────────────
 app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res) => {
   const { sessionId, siteRoot, env } = req.body;
@@ -2128,7 +2155,9 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
 
     const mk = () => ({ count: 0, files: new Set(), examples: [] });
     const checks = { shortPath: mk(), absolute: mk(), pdf: mk(), dam: mk(), scene7: mk() };
-    const crossLocale = mk();
+    const crossGroups = new Map();       // sourceRoot -> mk()  (cross-locale links grouped by detected source locale)
+    const crossUnresolved = mk();        // cross-locale links with no matching config locale → manual
+    const localeRoots = loadLocaleRoots();
     const domains = new Map();   // host -> { count, files:Set }
     let pagesScanned = 0, xmlTotal = 0;
 
@@ -2150,7 +2179,11 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
         else if (kind === 'pdf-dam')      addEx(checks.pdf, file, url);
         else if (kind === 'dam-asset')    addEx(checks.dam, file, url);
         else if (kind === 'short-path')   addEx(checks.shortPath, file, url);
-        else if (kind === 'cross-locale') addEx(crossLocale, file, url);
+        else if (kind === 'cross-locale') {
+          const S = qaSourceRoot(url, localeRoots);
+          if (S) { if (!crossGroups.has(S)) crossGroups.set(S, mk()); addEx(crossGroups.get(S), file, url); }
+          else addEx(crossUnresolved, file, url);
+        }
         else if (kind === 'absolute') {
           const host = qaHost(url);
           if (!host) continue;
@@ -2162,6 +2195,16 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
     }
 
     const pack = c => ({ count: c.count, files: c.files.size, examples: c.examples });
+
+    const crossGroupsArr = [...crossGroups.entries()].map(([sourceRoot, c]) => ({
+      sourceRoot,
+      label: sourceRoot.split('/abbvie-com/')[1] || sourceRoot,   // short locale label, e.g. "us/en" or "language-masters/gr"
+      count: c.count, files: c.files.size, examples: c.examples,
+    })).sort((a, b) => b.count - a.count);
+    const crossFilesSet = new Set();
+    for (const c of crossGroups.values()) for (const f of c.files) crossFilesSet.add(f);
+    for (const f of crossUnresolved.files) crossFilesSet.add(f);
+    const crossCount = crossGroupsArr.reduce((s, g) => s + g.count, 0) + crossUnresolved.count;
 
     res.json({
       siteRoot: R,
@@ -2179,7 +2222,7 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
       domains: [...domains.entries()]
         .map(([host, d]) => ({ host, count: d.count, files: d.files.size, guessInternal: qaGuessInternal(host) }))
         .sort((a, b) => b.count - a.count),
-      crossLocale: pack(crossLocale),
+      crossLocale: { count: crossCount, files: crossFilesSet.size, groups: crossGroupsArr, unresolved: pack(crossUnresolved) },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2200,6 +2243,43 @@ function qaFixShortPaths(xml, R) {
     if (np === p) return m;
     changes.push({ oldUrl: p, newUrl: np });
     return d + np;
+  });
+  return { result, changes };
+}
+
+// Cross-locale prefix find & replace. mappings = [{from, to}] sorted desc by from.length.
+// For each quoted /content/... page path, the first source root that prefixes it is
+// swapped for its target: `to + path.slice(from.length)`. /content/dam and under-R links
+// never match a source root, so they're untouched. Runs inside the masked block region.
+// The locale-root portion of a /content path — R's own locale suffix OR any
+// language-masters/<lang> segment (mirrors the client's lcLocaleRootOf). Used to
+// scope a cross-locale mapping to the pages of a given locale.
+function qaLocaleRootOf(path, R) {
+  const m = R.match(/^(.*\/abbvie-com)\/(.+)$/);
+  const localeSuffix = m ? m[2] : R.split('/').filter(Boolean).slice(-2).join('/');
+  const esc = localeSuffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re  = new RegExp('(\\/' + esc + '|\\/language-masters\\/[a-z][a-z0-9-]*)(?=\\/|$)', 'i');
+  const mm  = path.match(re);
+  return mm ? path.slice(0, mm.index + mm[1].length) : null;
+}
+
+// mappings = [{from, to, page?}]. A mapping with `page` applies only to files whose own
+// locale root equals `page`; a mapping without `page` applies everywhere.
+function qaFixCrossLocale(xml, mappings, pageLocaleRoot) {
+  const active = (mappings || []).filter(m => !m.page || m.page === pageLocaleRoot);
+  if (!active.length) return { result: xml, changes: [] };
+  const changes = [];
+  const RE = /([="']|&quot;)(\/content\/[^"'<>&]+)/g;
+  const result = xml.replace(RE, (m, d, path) => {
+    for (const { from, to } of active) {
+      if (path === from || path.startsWith(from + '/')) {
+        const np = to + path.slice(from.length);
+        if (np === path) return m;
+        changes.push({ oldUrl: path, newUrl: np });
+        return d + np;
+      }
+    }
+    return m;
   });
   return { result, changes };
 }
@@ -2244,23 +2324,33 @@ function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which) {
   // The DAM ref itself may carry an optional absolute-host prefix (a legacy hardcoded
   // https://www.abbvie.com/content/dam/... self-link) — matched and replaced whole,
   // same as damPathOf() does for classification/recovery.
-  let content = xml.replace(/(["'=]|&quot;)((?:https?:\/\/[^/"'<>\s&]+)?\/content\/dam\/[^"'<>\s&]*)/g, (match, delim, rawUrl) => {
+  let content = xml.replace(/(["'=]|&quot;)((?:https?:\/\/[^/"'<>&]+)?\/content\/(?:%20|\s)*dam\/[^"'<>&]*)/g, (match, delim, rawUrl) => {
     const qIdx        = rawUrl.indexOf('?');
     const queryString = (qIdx !== -1 ? rawUrl.slice(qIdx + 1) : '').replace(/&amp;/g, '&');
     const presetMatch = queryString.match(/\$([^$]+)\$/);
     const presetName  = presetMatch ? presetMatch[1] : '';
     const modifierStr = queryString.replace(/\$[^$]+\$/g, '').replace(/^&+|&+$/g, '').replace(/&&+/g, '&');
     const translated  = translateModifiers(modifierStr);
-    let cleanPath = rawUrl.split('?')[0].split('#')[0]
+    const norm = p => damNorm ? normalizeDamPrefix(p, damNorm.correctRoot, damNorm.oldRoots) : p;
+    const base = rawUrl.split('?')[0].split('#')[0]
       .replace(/^https?:\/\/[^/]+/i, '')                      // strip a same-site absolute host prefix, if any
       .replace(/\/_jcr_content\/renditions\/.*$/, '')
       .replace(/\.coreimg.*$/, '');
-    if (damNorm) cleanPath = normalizeDamPrefix(cleanPath, damNorm.correctRoot, damNorm.oldRoots);
+    // Repair corrupted DAM paths: (1) segment-leading space/%20 ("/content/ dam/…" or
+    // "/content/%20dam/…"); (2) if that path isn't in the CSV, treat every stray space/%20
+    // as a lost "/" ("…/stories abbvie-…" → "…/stories/abbvie-…"). A genuine filename space
+    // (e.g. "Woman standing.jpg") resolves on the first (segment-leading-only) try.
+    let cleanPath = norm(base.replace(/\/(?:%20|\s)+/gi, '/'));
     const lastSeg = cleanPath.split('/').pop() || '';
     if (!lastSeg.includes('.')) return match;                // extensionless → content fragment / structural node, never converted
     const isPdf = /\.pdf$/i.test(lastSeg);
     if (isPdf ? !w.pdf : !w.dam) return match;               // this category not selected
-    const row = pathMap && pathMap.get(cleanPath);
+    let row = pathMap && pathMap.get(cleanPath);
+    if (!row) {
+      const alt = norm(base.replace(/(?:%20|\s)+/gi, '/'));
+      const altRow = pathMap && pathMap.get(alt);
+      if (altRow) { cleanPath = alt; row = altRow; }
+    }
     if (row) {
       if (row.isCF === 'true') return match;                      // content fragment — leave unchanged
       if (!/^https?:\/\//i.test(row.openApiUrl)) { unmatched.push(rawUrl); return match; }  // not on DM yet
@@ -2294,7 +2384,7 @@ function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which) {
 // Apply all QA fixes to every Franklin page in the ZIP (nested or flat).
 // Order: absolute → asset→DM → short-paths (so each step's output is safe for the next).
 async function buildQaFixedZip(buffer, opts) {
-  const { siteRoot, internalHosts, pathMap, scene7Map, damNorm } = opts;
+  const { siteRoot, internalHosts, pathMap, scene7Map, damNorm, crossLocaleMappings } = opts;
   const sel        = opts.checks || new Set(['shortPath', 'absolute', 'pdf', 'dam', 'scene7']);
   const assetWhich = { pdf: sel.has('pdf'), dam: sel.has('dam'), scene7: sel.has('scene7') };
   const doAsset    = assetWhich.pdf || assetWhich.dam || assetWhich.scene7;
@@ -2317,11 +2407,14 @@ async function buildQaFixedZip(buffer, opts) {
           const a = sel.has('absolute') ? qaFixAbsolute(body, siteRoot, internalHosts, damNorm) : { result: body, changes: [] };            body = a.result;
           const b = doAsset             ? qaFixAssetRefs(body, pathMap, scene7Map, damNorm, assetWhich) : { result: body, changes: [], unmatched: [] }; body = b.result;
           const c = sel.has('shortPath') ? qaFixShortPaths(body, siteRoot) : { result: body, changes: [] };                                  body = c.result;
+          const pageLocale = qaLocaleRootOf(file, siteRoot);
+          const x = (sel.has('crossLocale') && crossLocaleMappings?.length) ? qaFixCrossLocale(body, crossLocaleMappings, pageLocale) : { result: body, changes: [] }; body = x.result;
           body = unmaskProtected(body, protectedVals);   // restore cq:template/tags/MSM refs before writing back
           const after = pre + body + post;
-          for (const ch of a.changes) changes.push({ file, type: 'absolute',   ...ch });
-          for (const ch of b.changes) changes.push({ file, type: 'asset-dm',   ...ch });
-          for (const ch of c.changes) changes.push({ file, type: 'short-path', ...ch });
+          for (const ch of a.changes) changes.push({ file, type: 'absolute',     ...ch });
+          for (const ch of b.changes) changes.push({ file, type: 'asset-dm',     ...ch });
+          for (const ch of c.changes) changes.push({ file, type: 'short-path',   ...ch });
+          for (const ch of x.changes) changes.push({ file, type: 'cross-locale', ...ch });
           for (const u  of b.unmatched) unmatched.push({ file, url: u });
           if (after !== before) pagesFixed++;
           jsz.file(name, after);
@@ -2393,6 +2486,16 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
   const sel      = new Set(Array.isArray(checks) && checks.length ? checks : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7']);
   const needsCsv = sel.has('pdf') || sel.has('dam') || sel.has('scene7');
 
+  // Cross-locale prefix mappings: [{from, to}] — both must be /content/ paths. Longest source first.
+  const crossLocaleMappings = (Array.isArray(req.body.crossLocaleMappings) ? req.body.crossLocaleMappings : [])
+    .filter(m => m && typeof m.from === 'string' && typeof m.to === 'string' && m.from.startsWith('/content/') && m.to.startsWith('/content/'))
+    .map(m => ({ from: m.from.replace(/\/$/, ''), to: m.to.replace(/\/$/, ''),
+                 page: (typeof m.page === 'string' && m.page.startsWith('/content/')) ? m.page.replace(/\/$/, '') : '' }))
+    .sort((a, b) => b.from.length - a.from.length);
+  if (sel.has('crossLocale') && !crossLocaleMappings.length) {
+    return res.status(400).json({ error: 'No cross-locale groups selected (tick a group and enter a target path).' });
+  }
+
   try {
     let pathMap = null, scene7Map = null, damNorm = null, se = null;
     if (needsCsv) {
@@ -2426,7 +2529,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
       }
     }
 
-    const { buf, changes, unmatched, pagesFixed } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel });
+    const { buf, changes, unmatched, pagesFixed } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings });
     lcSessions.set(sessionId, buf);   // keep session, chained on the fixed result (enables per-category iteration + re-scan)
 
     const reportRows = changes.map(c => ({

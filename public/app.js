@@ -1390,15 +1390,105 @@ function lcRenderReport(data) {
       `<div class="form-text mt-1">Checked = external (left as-is). Unchecked = internal (domain stripped, re-rooted to the site root).</div>`;
   } else dc.style.display = 'none';
 
-  const cc = document.getElementById('lcCrossCard');
-  if (data.crossLocale.count) {
-    cc.style.display = '';
-    document.getElementById('lcCrossCount').textContent = data.crossLocale.count;
-    document.getElementById('lcCrossList').innerHTML = lcExamples(data.crossLocale.examples) || '<span class="text-muted small">—</span>';
-  } else cc.style.display = 'none';
-
+  lcRenderCrossLocale();
   lcRenderAbsolute();
   document.getElementById('lcReport').style.display = '';
+}
+
+// Cross-locale links, grouped by source locale. Each group: a checkbox, a count, the
+// source root, and an editable target root (pre-filled with R). "Fix cross-locale"
+// swaps each selected group's source prefix for its target. Unresolved links (no
+// matching config locale) are listed read-only for manual handling.
+function lcRenderCrossLocale() {
+  const cc = document.getElementById('lcCrossCard');
+  const cl = document.getElementById('lcCrossList');
+  const xl = lcAnalysis && lcAnalysis.crossLocale;
+  if (!xl || !xl.count) { cc.style.display = 'none'; return; }
+  cc.style.display = '';
+  document.getElementById('lcCrossCount').textContent = xl.count;
+  const R = document.getElementById('lcSiteRoot').value.trim();
+  const rm = R.match(/^(.*\/abbvie-com)\/(.+)$/);
+  const localeSuffix = rm ? rm[2] : R.split('/').filter(Boolean).slice(-2).join('/');
+  const exList = (arr, n) =>
+    arr.slice(0, n).map(e => `<li><code>${escHtml(e.url)}</code> <span class="text-secondary">— ${escHtml(e.file)}</span></li>`).join('') +
+    (arr.length > n ? `<li class="text-muted">… +${arr.length - n} more</li>` : '');
+
+  // All cross-locale occurrences (config groups carry sourceRoot; unresolved are derived),
+  // re-grouped by (source root, PAGE locale): the same link on a us/en page vs a
+  // language-masters page needs a different target, so they become separate groups.
+  const occ = [];
+  for (const g of (xl.groups || [])) for (const e of (g.examples || [])) occ.push({ file: e.file, url: e.url, sourceRoot: g.sourceRoot });
+  for (const e of ((xl.unresolved && xl.unresolved.examples) || [])) occ.push({ file: e.file, url: e.url, sourceRoot: lcLocaleRootOf(e.url, localeSuffix) });
+
+  const gmap = new Map();   // key -> { sourceRoot, pageLocale, count, examples }
+  const manual = [];
+  for (const o of occ) {
+    if (!o.sourceRoot) { manual.push(o); continue; }
+    const pageLocale = lcLocaleRootOf(o.file, localeSuffix) || R;
+    const key = o.sourceRoot + '||' + pageLocale;
+    if (!gmap.has(key)) gmap.set(key, { sourceRoot: o.sourceRoot, pageLocale, count: 0, examples: [] });
+    const g = gmap.get(key); g.count++; g.examples.push(o);
+  }
+  const groups = [...gmap.values()].sort((a, b) => b.count - a.count);
+
+  let html = groups.map((g, i) => `
+    <div class="lc-xloc-group border rounded p-2 mb-2" data-source="${escHtml(g.sourceRoot)}" data-page="${escHtml(g.pageLocale)}">
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <input class="form-check-input mt-0 lc-xloc-check" type="checkbox" id="lcXloc${i}" checked />
+        <label class="small mb-0" for="lcXloc${i}"><code class="fw-semibold">${escHtml(g.sourceRoot)}</code></label>
+        <span class="badge bg-danger">${g.count}</span>
+        <span class="badge bg-secondary-subtle text-secondary" title="page locale">on ${escHtml(g.pageLocale.split('/abbvie-com/')[1] || g.pageLocale)}</span>
+        <span class="ms-1 small">→</span>
+        <input type="text" class="form-control form-control-sm lc-xloc-target" style="max-width:520px"
+          value="${escHtml(g.pageLocale)}" placeholder="target root" />
+      </div>
+      <ul class="small text-muted mt-2 mb-0" style="max-height:220px;overflow:auto">${exList(g.examples, g.examples.length)}</ul>
+    </div>`).join('');
+
+  if (manual.length) {
+    html += `<div class="mt-3"><div class="small fw-semibold text-secondary">Couldn't auto-derive a source root — add a custom mapping below, or fix manually (${manual.length}):</div>
+      <ul class="small text-muted mb-0" style="max-height:320px;overflow:auto">${exList(manual, manual.length)}</ul></div>`;
+  }
+  html += `<div class="mt-3 pt-2 border-top">
+    <div class="small fw-semibold text-secondary mb-1">Custom mappings <span class="fw-normal">— any source root → target</span></div>
+    <div id="lcXlocCustom"></div>
+    <button class="btn btn-sm btn-outline-secondary mt-1" onclick="lcAddCustomXloc()"><i class="bi bi-plus me-1"></i>Add mapping</button>
+  </div>`;
+  html += `<div class="mt-3"><button class="btn btn-success btn-sm" onclick="lcFix(['crossLocale'])"><i class="bi bi-magic me-1"></i>Fix cross-locale &amp; download</button></div>`;
+  cl.innerHTML = html;
+}
+
+// The locale-root portion of a /content path — R's own locale suffix OR any
+// language-masters/<lang> segment. Returns the path up to and including the locale, or null.
+function lcLocaleRootOf(path, localeSuffix) {
+  const esc = localeSuffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re  = new RegExp('(\\/' + esc + '|\\/language-masters\\/[a-z][a-z0-9-]*)(?=\\/|$)', 'i');
+  const mm  = path.match(re);
+  return mm ? path.slice(0, mm.index + mm[1].length) : null;
+}
+
+// Add an empty custom source→target mapping row (target pre-filled with R).
+function lcAddCustomXloc() {
+  const box = document.getElementById('lcXlocCustom');
+  const R = document.getElementById('lcSiteRoot').value.trim();
+  const div = document.createElement('div');
+  div.className = 'lc-xloc-custom d-flex align-items-center gap-2 mb-1';
+  div.innerHTML = `
+    <input type="text" class="form-control form-control-sm lc-xloc-cfrom" style="max-width:420px" placeholder="/content/abbvie-com2/us/en" />
+    <span class="small">→</span>
+    <input type="text" class="form-control form-control-sm lc-xloc-cto" style="max-width:420px" value="${escHtml(R)}" placeholder="target root" />
+    <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="this.parentElement.remove()"><i class="bi bi-x"></i></button>`;
+  box.appendChild(div);
+}
+
+// Selected groups + custom rows → [{from, to}] (blank from/to skipped).
+function lcCrossLocaleMappings() {
+  const groups = [...document.querySelectorAll('#lcCrossList .lc-xloc-group')]
+    .filter(g => g.querySelector('.lc-xloc-check').checked)
+    .map(g => ({ from: g.dataset.source, to: g.querySelector('.lc-xloc-target').value.trim(), page: g.dataset.page || '' }));
+  const custom = [...document.querySelectorAll('#lcXlocCustom .lc-xloc-custom')]
+    .map(r => ({ from: r.querySelector('.lc-xloc-cfrom').value.trim(), to: r.querySelector('.lc-xloc-cto').value.trim() }));
+  return [...groups, ...custom].filter(m => m.from && m.to);
 }
 
 // internalDomains = the domains NOT ticked as external
@@ -1426,8 +1516,13 @@ async function lcFix(checks) {
   const status   = document.getElementById('lcFixStatus');
   status.className = 'small mt-2 text-muted'; status.textContent = 'Fixing…';
   try {
-    const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains() };
-    if (checks) body.checks = checks;
+    // checks === null → "Fix all": the 5 checks PLUS cross-locale when mappings are ready.
+    const mappings = lcCrossLocaleMappings();
+    let sel = checks;
+    if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'crossLocale']
+                                    : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7'];
+    const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel };
+    if (sel.includes('crossLocale')) body.crossLocaleMappings = mappings;
     const res = await fetch('/api/link-checker/fix', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
