@@ -827,12 +827,17 @@
 
     <!-- Report -->
     <div id="lcReportPanel" class="card mb-3" style="display:none;border-left:4px solid #6610f2">
-      <div class="card-header d-flex align-items-center gap-2">
+      <div class="card-header d-flex align-items-center gap-2 flex-wrap">
         <i class="bi bi-file-earmark-text text-primary"></i><strong>Migration QA report</strong>
         <span class="text-muted small ms-1">— every reference and what a fix would do (preview only, nothing changes)</span>
-        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="lcReportCsv()"><i class="bi bi-download me-1"></i>Download CSV</button>
+        <div class="form-check form-check-inline ms-auto mb-0">
+          <input class="form-check-input" type="checkbox" id="lcValidate" onchange="lcReport()" />
+          <label class="form-check-label small" for="lcValidate" title="HEAD-check every fixed URL against AEM / DM">Check URLs resolve (404)</label>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary" onclick="lcReportCsv()"><i class="bi bi-download me-1"></i>Download CSV</button>
+        <button type="button" class="btn btn-sm btn-link text-muted p-0" title="Collapse / expand" onclick="lcToggleCard(this)"><i class="bi bi-chevron-up"></i></button>
       </div>
-      <div class="card-body" id="lcReportBody"></div>
+      <div class="card-body lc-collapse" id="lcReportBody"></div>
     </div>
 
     <div id="lcReport" style="display:none">
@@ -856,12 +861,40 @@
         <div class="card-header d-flex align-items-center gap-2">
           <i class="bi bi-globe text-warning"></i><strong>Step 1 — classify absolute domains</strong>
           <span class="text-muted small ms-1">— tick the ones that are truly external (left as-is). Unticked = internal (domain stripped &amp; re-rooted when you fix Absolute URLs below).</span>
+          <button type="button" class="btn btn-sm btn-link text-muted p-0 ms-auto" title="Collapse / expand" onclick="lcToggleCard(this)"><i class="bi bi-chevron-up"></i></button>
         </div>
-        <div class="card-body" id="lcDomains"></div>
+        <div class="card-body lc-collapse" id="lcDomains"></div>
       </div>
 
       <!-- 5 check cards (rendered by JS) -->
       <div id="lcChecks"></div>
+
+      <!-- on-demand live-URL (404) validation — run after classifying absolute domains -->
+      <div class="card mb-3" id="lcBrokenCard" style="display:none;border-left:4px solid #6c757d">
+        <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+          <i class="bi bi-link-45deg text-secondary"></i><strong>Live URL check (404)</strong>
+          <span class="badge bg-secondary ms-1" id="lcBrokenCount" style="display:none">0</span>
+          <span class="text-muted small ms-1">— HEAD-checks each link's target. Classify absolute domains above first (internal ones are checked at their AEM path; external ones are skipped).</span>
+          <button class="btn btn-sm btn-outline-danger ms-auto" id="lcValidateBtn" onclick="lcValidateUrls()">
+            <i class="bi bi-heart-pulse me-1"></i>Check links resolve
+          </button>
+          <button type="button" class="btn btn-sm btn-link text-muted p-0" title="Collapse / expand" onclick="lcToggleCard(this)"><i class="bi bi-chevron-up"></i></button>
+        </div>
+        <div class="card-body lc-collapse" id="lcBrokenBody"><div class="text-muted small">Not run yet.</div></div>
+      </div>
+
+      <!-- accessibility findings (static scan — advisory, authors fix manually) -->
+      <div class="card mb-3" id="lcA11yCard" style="display:none;border-left:4px solid #0dcaf0">
+        <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+          <i class="bi bi-universal-access text-info"></i><strong>Accessibility</strong>
+          <span class="badge bg-info ms-1" id="lcA11yCount">0</span>
+          <span class="text-muted small ms-1">— missing/empty image alt text, lost captions, unlabeled controls, and vague link text, with the affected component, asset and pages. Advisory — fix these in the authored content.</span>
+          <button class="btn btn-sm btn-outline-success ms-auto" id="lcFillAltBtn" onclick="lcFixAlt()" title="Fetch each image's dc:title from its DAM metadata and write it as alt text"><i class="bi bi-magic me-1"></i>Fill alt text</button>
+          <button type="button" class="btn btn-sm btn-link text-muted p-0 ms-1" title="Collapse / expand" onclick="lcToggleCard(this)"><i class="bi bi-chevron-up"></i></button>
+          <div id="lcAltStatus" class="small w-100 mt-1"></div>
+        </div>
+        <div class="card-body lc-collapse" id="lcA11yBody"></div>
+      </div>
 
       <!-- cross-locale review -->
       <div class="card mb-3" id="lcCrossCard" style="display:none">
@@ -869,8 +902,9 @@
           <i class="bi bi-info-circle text-secondary"></i><strong>Cross-locale links</strong>
           <span class="badge bg-secondary ms-1" id="lcCrossCount">0</span>
           <span class="text-muted small ms-1">— full paths under a different locale, grouped by source. Tick a group and set the target root to re-point them; untick intentional ones.</span>
+          <button type="button" class="btn btn-sm btn-link text-muted p-0 ms-auto" title="Collapse / expand" onclick="lcToggleCard(this)"><i class="bi bi-chevron-up"></i></button>
         </div>
-        <div class="card-body" id="lcCrossList"></div>
+        <div class="card-body lc-collapse" id="lcCrossList"></div>
       </div>
 
       <!-- unresolved assets — author-supplied DM URLs (applied by Fix all) -->
@@ -879,8 +913,9 @@
           <i class="bi bi-patch-question text-danger"></i><strong>Unresolved assets</strong>
           <span class="badge bg-danger ms-1" id="lcUnresolvedCount">0</span>
           <span class="text-muted small ms-1">— not in the asset-map. Paste the DM Open API URL for each; Fix all will apply them.</span>
+          <button type="button" class="btn btn-sm btn-link text-muted p-0 ms-auto" title="Collapse / expand" onclick="lcToggleCard(this)"><i class="bi bi-chevron-up"></i></button>
         </div>
-        <div class="card-body" id="lcUnresolvedBody"></div>
+        <div class="card-body lc-collapse" id="lcUnresolvedBody"></div>
       </div>
     </div>
 

@@ -1343,11 +1343,26 @@ function lcExamples(examples) {
     `</ul>`;
 }
 
+// Collapse/expand the nearest collapsible body (.lc-collapse, else .card-body) in a card.
+function lcToggleCard(btn) {
+  const card = btn.closest('.card'); if (!card) return;
+  const body = card.querySelector('.lc-collapse') || card.querySelector('.card-body');
+  if (!body) return;
+  const hide = body.style.display !== 'none';
+  body.style.display = hide ? 'none' : '';
+  const icon = btn.querySelector('i');
+  if (icon) icon.className = hide ? 'bi bi-chevron-down' : 'bi bi-chevron-up';
+}
+function lcChevron() {
+  return `<button type="button" class="btn btn-sm btn-link text-muted p-0 lc-chev" title="Collapse / expand" onclick="event.stopPropagation();lcToggleCard(this)"><i class="bi bi-chevron-up"></i></button>`;
+}
+
 function lcCheckCard(c, count, examples) {
   const pass   = count === 0;
   const border = pass ? '#198754' : '#dc3545';
   const fixBtn = pass ? '' :
     `<button class="btn btn-sm btn-outline-success" onclick="lcFix(['${c.key}'])"><i class="bi bi-magic me-1"></i>Fix</button>`;
+  const ex = lcExamples(examples);
   return `
   <div class="card mb-2" style="border-left:4px solid ${border}">
     <div class="card-body py-2">
@@ -1356,9 +1371,9 @@ function lcCheckCard(c, count, examples) {
         <strong>${escHtml(c.label)}</strong>
         <span class="badge ${pass ? 'bg-success' : 'bg-danger'}">${pass ? 'PASS' : count}</span>
         <span class="text-muted small">— ${escHtml(c.desc)}</span>
-        <div class="ms-auto">${fixBtn}</div>
+        <div class="ms-auto d-flex align-items-center gap-2">${fixBtn}${ex ? lcChevron() : ''}</div>
       </div>
-      ${lcExamples(examples)}
+      ${ex ? `<div class="lc-collapse">${ex}</div>` : ''}
     </div>
   </div>`;
 }
@@ -1395,10 +1410,122 @@ function lcRenderReport(data) {
       `<div class="form-text mt-1">Checked = external (left as-is). Unchecked = internal (domain stripped, re-rooted to the site root).</div>`;
   } else dc.style.display = 'none';
 
+  lcResetBroken();
+  lcRenderAccessibility(data);
   lcRenderCrossLocale();
   lcRenderAbsolute();
   lcRenderUnresolvedAssets(data);
   document.getElementById('lcReport').style.display = '';
+}
+
+// Reset the on-demand Live URL check card whenever a fresh scan renders.
+function lcResetBroken() {
+  const card = document.getElementById('lcBrokenCard');
+  card.style.display = '';
+  card.style.borderLeftColor = '#6c757d';
+  document.getElementById('lcBrokenCount').style.display = 'none';
+  document.getElementById('lcBrokenBody').innerHTML = '<div class="text-muted small">Not run yet — classify absolute domains above, then click “Check links resolve”.</div>';
+}
+
+// On-demand live-URL (404) validation — respects the current internal/external domain choices.
+async function lcValidateUrls() {
+  if (!lcSessionId) { alert('Scan first.'); return; }
+  const siteRoot = document.getElementById('lcSiteRoot').value.trim();
+  const env  = document.getElementById('lcEnv').value;
+  const btn  = document.getElementById('lcValidateBtn');
+  const body = document.getElementById('lcBrokenBody');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Checking…';
+  body.innerHTML = '<div class="text-muted small"><span class="spinner-border spinner-border-sm me-2"></span>HEAD-checking link targets against AEM / DM…</div>';
+  try {
+    const res = await fetch('/api/link-checker/validate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains() }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Validation failed');
+    lcRenderBroken(data);
+  } catch (e) { body.innerHTML = `<div class="text-danger small">${escHtml(e.message)}</div>`; }
+  finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-heart-pulse me-1"></i>Re-check'; }
+}
+
+// Status badge colour for a HEAD-check result.
+function lcStatusBadge(s) {
+  const cls = /^2\d\d/.test(s) ? 'bg-success'
+    : /^3\d\d/.test(s) ? 'bg-info'
+    : /^[45]\d\d/.test(s) ? 'bg-danger'
+    : s.startsWith('ERR') ? 'bg-warning text-dark'
+    : 'bg-secondary';
+  return `<span class="badge ${cls} text-nowrap" style="min-width:3.2rem">${escHtml(s)}</span>`;
+}
+
+// Render the results of an on-demand /validate call — lists EVERY checked link.
+function lcRenderBroken(data) {
+  const card = document.getElementById('lcBrokenCard');
+  const c = data.validatedCounts || { checked: 0, broken: 0, errors: 0, skipped: 0 };
+  const links = data.links || [];
+  const badCount = c.broken + c.errors;
+  const badge = document.getElementById('lcBrokenCount');
+  badge.style.display = ''; badge.textContent = badCount;
+  badge.className = `badge ms-1 ${badCount ? 'bg-danger' : 'bg-success'}`;
+  card.style.borderLeftColor = badCount ? '#dc3545' : '#198754';
+
+  const aemNote = !data.hasAem
+    ? '<div class="alert alert-warning py-2 small mb-2">No AEM host for the selected env — internal <code>/content</code> page &amp; asset paths can’t be reached, so only absolute DM URLs were checked. Pick an env with an AEM URL for a full check.</div>'
+    : '';
+  const summary = `<div class="small mb-2">HEAD-checked <strong>${c.checked}</strong> target(s): ` +
+    `<strong class="${c.broken ? 'text-danger' : 'text-success'}">${c.broken} not found (404)</strong>, ` +
+    `${c.errors} unreachable${c.skipped ? `, ${c.skipped} not checkable` : ''}.</div>`;
+
+  const rows = links.length ? links.map(b => `
+      <div class="d-flex align-items-center gap-2 py-1 border-top">
+        ${lcStatusBadge(b.headStatus)}
+        <span class="badge bg-light text-dark border text-nowrap">${escHtml(b.check)}</span>
+        <code class="small flex-grow-1" style="word-break:break-all">${escHtml(b.newUrl)}</code>
+        <span class="text-muted small text-nowrap">${b.count}× · ${b.files} pg</span>
+      </div>`).join('')
+    : '<div class="text-muted small">No checkable link targets found.</div>';
+
+  document.getElementById('lcBrokenBody').innerHTML =
+    aemNote + summary + `<div style="max-height:340px;overflow:auto">${rows}</div>`;
+}
+
+// Static accessibility findings (advisory — not auto-fixed).
+const LC_A11Y_HINT = {
+  'missing alt text': 'No <code>alt</code> — screen readers announce nothing. Add descriptive alt text.',
+  'empty alt text': 'Empty <code>alt</code> — fine only for purely decorative images; otherwise describe it.',
+  'control has no accessible label': 'Icon/link with no visible text or <code>aria-label</code> — add a label.',
+  'missing caption': 'Figure has no <code>&lt;figcaption&gt;</code>.',
+  'empty caption': 'Caption field is blank — a caption may have been lost in migration.',
+  'vague link text': 'Link text like "read more" is meaningless out of context — make it descriptive.',
+};
+function lcRenderAccessibility(data) {
+  const card = document.getElementById('lcA11yCard');
+  const list = data.accessibility || [];
+  if (!list.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  const total = list.reduce((s, a) => s + a.count, 0);
+  document.getElementById('lcA11yCount').textContent = total;
+  document.getElementById('lcA11yBody').innerHTML = list.map((a, i) => {
+    const pageOf = p => p.replace(/\/(?:_?jcr_content|\.content\.xml).*$/i, '').replace(/\.content\.xml$/i, '');
+    const samples = (a.samples || []).map(s => `
+      <li class="mb-1">
+        ${s.asset ? `<span class="fw-semibold">${escHtml(s.asset)}</span> — ` : ''}<code style="word-break:break-all">${escHtml(s.value || '(no value)')}</code>
+        <div class="text-secondary" style="font-size:.75rem">${escHtml(pageOf(s.page))}</div>
+      </li>`).join('');
+    const more = a.count > (a.samples || []).length ? `<div class="form-text mb-0">…and ${a.count - a.samples.length} more occurrence(s).</div>` : '';
+    return `
+    <div class="mb-2 pb-2 border-bottom">
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span class="badge bg-info">${escHtml(a.issue)}</span>
+        <code class="small">${escHtml(a.node)}</code>
+        ${a.prop ? `<span class="text-muted small">· <code>${escHtml(a.prop)}</code></span>` : ''}
+        <span class="text-muted small ms-auto">${a.count} occurrence(s) · ${a.files} page(s)</span>
+      </div>
+      ${LC_A11Y_HINT[a.issue] ? `<div class="small text-muted mt-1">${LC_A11Y_HINT[a.issue]}</div>` : ''}
+      <ul class="small mt-2 mb-0" style="max-height:220px;overflow:auto">${samples}</ul>
+      ${more}
+    </div>`;
+  }).join('');
 }
 
 // Assets the asset-map can't resolve — author pastes a DM URL for each; Fix all applies them.
@@ -1552,11 +1679,11 @@ async function lcFix(checks) {
   const status   = document.getElementById('lcFixStatus');
   status.className = 'small mt-2 text-muted'; status.textContent = 'Fixing…';
   try {
-    // checks === null → "Fix all": the 5 checks PLUS cross-locale when mappings are ready.
+    // checks === null → "Fix all": the 5 checks + image alt text, PLUS cross-locale when mappings are ready.
     const mappings = lcCrossLocaleMappings();
     let sel = checks;
-    if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'crossLocale']
-                                    : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7'];
+    if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'crossLocale']
+                                    : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt'];
     const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel };
     if (sel.includes('crossLocale')) body.crossLocaleMappings = mappings;
     if (sel.some(c => c === 'pdf' || c === 'dam' || c === 'scene7')) body.customAssetMappings = lcCustomAssetMappings();
@@ -1583,6 +1710,40 @@ async function lcFix(checks) {
   } catch (e) { status.className = 'small mt-2 text-danger'; status.textContent = e.message; }
 }
 
+// Auto-fill missing image alt text from each asset's DAM metadata dc:title.
+async function lcFixAlt() {
+  if (!lcSessionId) { alert('Scan first.'); return; }
+  const siteRoot = document.getElementById('lcSiteRoot').value.trim();
+  const env      = document.getElementById('lcEnv').value;
+  const btn      = document.getElementById('lcFillAltBtn');
+  const status   = document.getElementById('lcAltStatus');
+  if (!env) { status.className = 'small w-100 mt-1 text-danger'; status.textContent = 'Select a target environment first — needed to read the DAM metadata.'; return; }
+  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Filling…';
+  status.className = 'small w-100 mt-1 text-muted';
+  status.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Reading dc:title from each asset’s metadata…';
+  try {
+    const res = await fetch('/api/link-checker/fix-alt', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env }),
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Alt-text fix failed'); }
+    const filled  = res.headers.get('X-Alt-Filled');
+    const skipped = res.headers.get('X-Alt-Skipped');
+    const pages   = res.headers.get('X-Pages-Fixed');
+    const reportId = res.headers.get('X-Report-Id');
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'alt-fixed-package.zip'; a.click();
+    URL.revokeObjectURL(url);
+    status.className = 'small w-100 mt-1 text-success';
+    status.innerHTML = `✓ Filled alt on <strong>${filled}</strong> image(s) across ${pages} page(s)` +
+      (skipped > 0 ? `, ${skipped} skipped (see report)` : '') + `. ZIP downloaded.` +
+      (reportId ? ` — <a href="/api/link-checker/fix-report/${reportId}">download report CSV</a>` : '');
+    await lcScan();   // refresh — session now holds the alt-filled package
+  } catch (e) { status.className = 'small w-100 mt-1 text-danger'; status.textContent = e.message; }
+  finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-magic me-1"></i>Fill alt text'; }
+}
+
 // ─── Migration QA report (dry-run preview) ────────────────────────────────────
 let lcReportData = null;
 let lcReportFilterCls = 'all';
@@ -1593,6 +1754,7 @@ const LC_VERDICT = {
   warn: { label: 'Needs attention', badge: 'bg-warning'   },
   cant: { label: "Can't fix",       badge: 'bg-danger'    },
   skip: { label: 'Skipped',         badge: 'bg-secondary' },
+  a11y: { label: 'Accessibility',   badge: 'bg-info'      },
 };
 
 async function lcReport() {
@@ -1604,9 +1766,11 @@ async function lcReport() {
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Reporting...';
   try {
     await lcEnsureSession();
+    const validate = document.getElementById('lcValidate')?.checked || false;
+    if (validate) btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Validating URLs...';
     const res  = await fetch('/api/link-checker/report', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env }),
+      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env, validate }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Report failed');
@@ -1626,18 +1790,32 @@ function lcRenderReportPanel() {
 
   const chip = (cls, label, n) =>
     `<button class="btn btn-sm ${lcReportFilterCls === cls ? 'btn-dark' : 'btn-outline-secondary'}" onclick="lcSetReportFilter('${cls}')">${label} <span class="badge ${cls === 'all' ? 'bg-secondary' : LC_VERDICT[cls].badge} ms-1">${n}</span></button>`;
-  const chips = chip('all', 'All', s.fix + s.ok + s.warn + s.cant + s.skip) +
-    ['fix', 'ok', 'warn', 'cant', 'skip'].map(c => chip(c, LC_VERDICT[c].label, s[c] || 0)).join('');
+  let chips = chip('all', 'All', (s.fix || 0) + (s.ok || 0) + (s.warn || 0) + (s.cant || 0) + (s.skip || 0) + (s.a11y || 0)) +
+    ['fix', 'ok', 'warn', 'cant', 'skip', 'a11y'].map(c => chip(c, LC_VERDICT[c].label, s[c] || 0)).join('');
+  if (d.validated) chips += chip('broken', 'Broken (404)', d.validatedCounts.broken + d.validatedCounts.errors);
 
-  const rows = d.rows.filter(r => lcReportFilterCls === 'all' || r.cls === lcReportFilterCls);
+  const isBroken = r => /^40[34]$/.test(r.headStatus) || (r.headStatus || '').startsWith('ERR');
+  const rows = d.rows.filter(r =>
+    lcReportFilterCls === 'all' ? true :
+    lcReportFilterCls === 'broken' ? isBroken(r) :
+    r.cls === lcReportFilterCls);
+
+  const headBadge = r => {
+    const st = r.headStatus;
+    if (!st) return '';
+    const cls = /^[23]\d\d$/.test(st) ? 'bg-success' : (/^40[34]/.test(st) ? 'bg-danger' : (st.startsWith('ERR') ? 'bg-warning' : 'bg-secondary'));
+    return ` <span class="badge ${cls}" title="live URL check">${escHtml(st)}</span>`;
+  };
+
   const rowHtml = rows.map(r => {
-    const newLine = r.newUrl
-      ? `<div class="small"><i class="bi bi-arrow-return-right text-muted me-1"></i><code class="text-success" style="word-break:break-all">${escHtml(r.newUrl)}</code></div>`
-      : `<div class="small text-muted"><i class="bi bi-arrow-return-right me-1"></i>${r.cls === 'cant' ? "— can't fix —" : (r.cls === 'skip' ? 'unchanged' : '— review —')}</div>`;
+    const newLine = r.cls === 'a11y' ? ''
+      : r.newUrl
+        ? `<div class="small"><i class="bi bi-arrow-return-right text-muted me-1"></i><code class="text-success" style="word-break:break-all">${escHtml(r.newUrl)}</code></div>`
+        : `<div class="small text-muted"><i class="bi bi-arrow-return-right me-1"></i>${r.cls === 'cant' ? "— can't fix —" : (r.cls === 'skip' ? 'unchanged' : '— review —')}</div>`;
     return `<div class="py-2 border-top">
       <div class="d-flex align-items-center gap-2 flex-wrap">
         <span class="badge bg-light text-dark border">${escHtml(r.check)}</span>
-        <span class="badge ${LC_VERDICT[r.cls].badge}">${escHtml(r.verdict)}</span>
+        <span class="badge ${LC_VERDICT[r.cls].badge}">${escHtml(r.verdict)}</span>${headBadge(r)}
         <span class="text-muted small ms-auto">${r.count} ref(s) · ${r.files} page(s)</span>
       </div>
       <div class="small mt-1"><code class="text-muted" style="word-break:break-all">${escHtml(r.current)}</code></div>
@@ -1645,8 +1823,12 @@ function lcRenderReportPanel() {
     </div>`;
   }).join('') || '<div class="text-muted small py-2">No references in this category.</div>';
 
+  const valLine = d.validated
+    ? ` <span class="text-secondary">Validated ${d.validatedCounts.checked} URL(s): <strong class="${d.validatedCounts.broken ? 'text-danger' : 'text-success'}">${d.validatedCounts.broken} broken (404)</strong>, ${d.validatedCounts.errors} error(s).</span>`
+    : '';
+
   document.getElementById('lcReportBody').innerHTML =
-    `<div class="text-muted small mb-2">Scanned <strong>${d.pagesScanned}</strong> Franklin page(s). Site root <code>${escHtml(d.siteRoot)}</code>.${d.env ? ` Env <strong>${escHtml(d.env)}</strong>${d.csvExists ? '' : ' <span class="text-danger">(no CSV — asset verdicts limited)</span>'}.` : ' <span class="text-warning">No env selected — asset verdicts limited.</span>'}</div>
+    `<div class="text-muted small mb-2">Scanned <strong>${d.pagesScanned}</strong> Franklin page(s). Site root <code>${escHtml(d.siteRoot)}</code>.${d.env ? ` Env <strong>${escHtml(d.env)}</strong>${d.csvExists ? '' : ' <span class="text-danger">(no CSV — asset verdicts limited)</span>'}.` : ' <span class="text-warning">No env selected — asset verdicts limited.</span>'}${valLine}</div>
      <div class="d-flex gap-2 flex-wrap mb-3">${chips}</div>
      <div style="max-height:540px;overflow:auto">${rowHtml}</div>`;
 }
@@ -1654,9 +1836,9 @@ function lcRenderReportPanel() {
 function lcReportCsv() {
   if (!lcReportData) return;
   const esc = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
-  const header = ['check', 'verdict', 'current', 'new', 'refs', 'pages', 'sample_page'];
+  const header = ['check', 'verdict', 'current', 'new', 'head_status', 'refs', 'pages', 'sample_page'];
   const lines = [header.join(',')].concat(lcReportData.rows.map(r =>
-    [r.check, r.verdict, r.current, r.newUrl, r.count, r.files, (r.sample && r.sample[0]) || ''].map(esc).join(',')));
+    [r.check, r.verdict, r.current, r.newUrl, r.headStatus || '', r.count, r.files, (r.sample && r.sample[0]) || ''].map(esc).join(',')));
   const blob = new Blob([lines.join('\r\n')], { type: 'text/csv' });
   const url  = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = 'qa-report.csv'; a.click();

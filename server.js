@@ -2163,15 +2163,16 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
     let pagesScanned = 0, xmlTotal = 0;
 
     // Load the env asset-map (if any) so we can flag which DAM/PDF/Scene7 refs are unresolved.
+    const se = env ? loadSiteConfig().environments.find(e => e.name === env) : null;
     let pathMap = null, scene7Map = null, damNorm = null;
     if (env && fs.existsSync(csvPath(env))) {
       const csvRows = parse(fs.readFileSync(csvPath(env), 'utf8'), { columns: true, skip_empty_lines: true });
       pathMap   = new Map(csvRows.filter(r => r.path && r.openApiUrl).map(r => [r.path, r]));
       scene7Map = buildScene7LookupMap(csvRows);
-      const se  = loadSiteConfig().environments.find(e => e.name === env);
       damNorm   = { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
     }
     const unresolvedAssets = new Map();   // ref -> { current, check, verdict, count }
+    const a11yAgg = new Map();            // issue|node -> { node, issue, prop, count, files:Set, samples:[] }
 
     const addEx = (c, file, url) => { c.count++; c.files.add(file); c.examples.push({ file, url }); };   // return all (client lists/filters them)
 
@@ -2184,8 +2185,10 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
       pagesScanned++;
       const file = entry.entryName.replace(/^jcr_root/, '');
       const pageIsLM = /\/language-masters\//i.test(entry.entryName);   // is THIS page a blueprint/language-master page?
+      const region = franklinBlockRegion(content).region;
+      const ctx = { R, pathMap, scene7Map, damNorm, pageIsLM, pageLocaleRoot: qaLocaleRootOf(file, R), localeRoots };
 
-      for (const url of extractLinks(franklinBlockRegion(content).region)) {   // authored blocks only, not page-node props
+      for (const url of extractLinks(region)) {   // authored blocks only, not page-node props
         const kind = qaClassify(url, R, pageIsLM);
         if      (kind === 'scene7')       addEx(checks.scene7, file, url);
         else if (kind === 'pdf-dam')      addEx(checks.pdf, file, url);
@@ -2206,14 +2209,27 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
 
         // Flag DAM/PDF/Scene7 refs the asset-map can't resolve (need a manual DM URL before Fix).
         if (pathMap && (kind === 'scene7' || kind === 'pdf-dam' || kind === 'dam-asset')) {
-          const rr = qaResolveLink(url, { R, pathMap, scene7Map, damNorm, pageIsLM, pageLocaleRoot: null, localeRoots });
+          const rr = qaResolveLink(url, ctx);
           if (rr && !rr.newUrl && (rr.cls === 'cant' || rr.cls === 'warn')) {
             if (!unresolvedAssets.has(url)) unresolvedAssets.set(url, { current: url, check: rr.check, verdict: rr.verdict, count: 0 });
             unresolvedAssets.get(url).count++;
           }
         }
       }
+
+      for (const f of qaAccessibility(region)) {
+        const key = f.issue + '|' + f.node;
+        if (!a11yAgg.has(key)) a11yAgg.set(key, { node: f.node, issue: f.issue, prop: f.prop, count: 0, files: new Set(), samples: [] });
+        const a = a11yAgg.get(key); a.count++; a.files.add(file);
+        if (a.samples.length < 10 && !a.samples.some(s => s.page === file && s.value === f.value))
+          a.samples.push({ page: file, asset: f.asset, prop: f.prop, value: f.value });
+      }
     }
+
+    const a11yOrder = { 'missing alt text': 0, 'empty alt text': 1, 'control has no accessible label': 2, 'missing caption': 3, 'empty caption': 4, 'vague link text': 5 };
+    const accessibility = [...a11yAgg.values()]
+      .map(a => ({ node: a.node, issue: a.issue, prop: a.prop, count: a.count, files: a.files.size, samples: a.samples }))
+      .sort((a, b) => (a11yOrder[a.issue] ?? 9) - (a11yOrder[b.issue] ?? 9) || b.count - a.count);
 
     const pack = c => ({ count: c.count, files: c.files.size, examples: c.examples });
 
@@ -2245,6 +2261,7 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
         .sort((a, b) => b.count - a.count),
       crossLocale: { count: crossCount, files: crossFilesSet.size, groups: crossGroupsArr, unresolved: pack(crossUnresolved) },
       unresolvedAssets: [...unresolvedAssets.values()].sort((a, b) => b.count - a.count),
+      accessibility,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2418,8 +2435,9 @@ function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which, customMap) {
 // Apply all QA fixes to every Franklin page in the ZIP (nested or flat).
 // Order: absolute → asset→DM → short-paths (so each step's output is safe for the next).
 async function buildQaFixedZip(buffer, opts) {
-  const { siteRoot, internalHosts, pathMap, scene7Map, damNorm, crossLocaleMappings } = opts;
+  const { siteRoot, internalHosts, pathMap, scene7Map, damNorm, crossLocaleMappings, altByValue } = opts;
   const sel        = opts.checks || new Set(['shortPath', 'absolute', 'pdf', 'dam', 'scene7']);
+  const doAlt      = sel.has('alt') && altByValue && altByValue.size > 0;
   const assetWhich = { pdf: sel.has('pdf'), dam: sel.has('dam'), scene7: sel.has('scene7') };
   const doAsset    = assetWhich.pdf || assetWhich.dam || assetWhich.scene7;
   const customMap  = new Map((opts.customAssetMappings || []).filter(m => m && m.from && m.to).map(m => [m.from, m.to]));
@@ -2439,6 +2457,7 @@ async function buildQaFixedZip(buffer, opts) {
           const file = name.replace(/^jcr_root/, '');
           const { before: pre, region, after: post, protectedVals } = franklinBlockRegion(before);
           let body = region;   // fix authored blocks + content fields; cq:template/tags/MSM refs stay masked
+          const al = doAlt ? qaFixAltText(body, altByValue) : { result: body, changes: [] };                                              body = al.result;   // alt first — matches original image values before asset conversion
           const a = sel.has('absolute') ? qaFixAbsolute(body, siteRoot, internalHosts, damNorm) : { result: body, changes: [] };            body = a.result;
           const b = doAsset             ? qaFixAssetRefs(body, pathMap, scene7Map, damNorm, assetWhich, customMap) : { result: body, changes: [], unmatched: [] }; body = b.result;
           const c = sel.has('shortPath') ? qaFixShortPaths(body, siteRoot) : { result: body, changes: [] };                                  body = c.result;
@@ -2446,6 +2465,7 @@ async function buildQaFixedZip(buffer, opts) {
           const x = (sel.has('crossLocale') && crossLocaleMappings?.length) ? qaFixCrossLocale(body, crossLocaleMappings, pageLocale) : { result: body, changes: [] }; body = x.result;
           body = unmaskProtected(body, protectedVals);   // restore cq:template/tags/MSM refs before writing back
           const after = pre + body + post;
+          for (const ch of al.changes) changes.push({ file, type: 'alt-text', oldUrl: ch.value, newUrl: `${ch.altProp}="${ch.alt}"` });
           for (const ch of a.changes) changes.push({ file, type: 'absolute',     ...ch });
           for (const ch of b.changes) changes.push({ file, type: 'asset-dm',     ...ch });
           for (const ch of c.changes) changes.push({ file, type: 'short-path',   ...ch });
@@ -2519,7 +2539,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
   const R = siteRoot.replace(/\/$/, '');
   const internalHosts = new Set((internalDomains || []).map(h => String(h).toLowerCase()));
   const sel      = new Set(Array.isArray(checks) && checks.length ? checks : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7']);
-  const needsCsv = sel.has('pdf') || sel.has('dam') || sel.has('scene7');
+  const needsCsv = sel.has('pdf') || sel.has('dam') || sel.has('scene7') || sel.has('alt');
 
   // Cross-locale prefix mappings: [{from, to}] — both must be /content/ paths. Longest source first.
   const crossLocaleMappings = (Array.isArray(req.body.crossLocaleMappings) ? req.body.crossLocaleMappings : [])
@@ -2537,12 +2557,13 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
     .filter(m => m && typeof m.from === 'string' && typeof m.to === 'string' && m.from && /^https?:\/\//i.test(m.to));
 
   try {
-    let pathMap = null, scene7Map = null, damNorm = null, se = null;
+    let pathMap = null, scene7Map = null, damNorm = null, se = null, uuidToRow = null;
     if (needsCsv) {
       if (env && fs.existsSync(csvPath(env))) {
         const rows = parse(fs.readFileSync(csvPath(env), 'utf8'), { columns: true, skip_empty_lines: true });
         pathMap   = new Map(rows.filter(r => r.path && r.openApiUrl).map(r => [r.path, r]));
         scene7Map = buildScene7LookupMap(rows);
+        uuidToRow = new Map(rows.filter(r => r.uuid && r.path).map(r => [r.uuid.toLowerCase(), r]));
         se        = loadSiteConfig().environments.find(e => e.name === env);
       } else if (!customAssetMappings.length) {
         return res.status(400).json({ error: env
@@ -2572,7 +2593,18 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
       }
     }
 
-    const { buf, changes, unmatched, pagesFixed } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings });
+    // Alt-text auto-fill (when 'alt' is selected, e.g. Fix all): resolve missing-alt images
+    // to their /content/dam path and read metadata dc:title off the env's AEM author.
+    let altByValue = new Map();
+    if (sel.has('alt') && uuidToRow) {
+      const host = se?.aemUrl || appConfig?.target?.host;
+      if (host) {
+        const alt = await computeAltFills(buffer, uuidToRow, damNorm, { host, username: appConfig?.target?.username, password: appConfig?.target?.password });
+        altByValue = alt.altByValue;
+      }
+    }
+
+    const { buf, changes, unmatched, pagesFixed } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue });
     lcSessions.set(sessionId, buf);   // keep session, chained on the fixed result (enables per-category iteration + re-scan)
 
     const reportRows = changes.map(c => ({
@@ -2676,19 +2708,16 @@ app.post('/api/link-checker/detect-root', express.json({ limit: '1mb' }), (req, 
 // HEAD-check each rewritten URL against AEM to flag 404s. Mutates reportRows
 // (adds `headStatus`). cfg = { aemHost, username, password } or null to skip.
 async function headCheckReport(reportRows, cfg) {
-  if (!cfg || !cfg.aemHost) {
-    for (const r of reportRows) r.headStatus = r.newUrl ? 'not checked' : '';
-    return { checked: 0, notFound: 0, errors: 0 };
-  }
-  const base = cfg.aemHost.replace(/\/$/, '');
+  const base = cfg && cfg.aemHost ? cfg.aemHost.replace(/\/$/, '') : null;
 
   // Map a rewritten URL to an absolute, fetchable URL (+ whether AEM auth applies).
-  //  absolute (DM delivery)        → as-is, no auth
-  //  /content/dam/... (asset)      → authHost + path
-  //  /content/... (page)           → authHost + path + .html  (renders the page node)
+  //  absolute (DM delivery)        → as-is, no auth (checkable even without an AEM host)
+  //  /content/dam/... (asset)      → authHost + path            (needs AEM host)
+  //  /content/... (page)           → authHost + path + .html    (needs AEM host, renders the page node)
   const toTarget = u => {
     if (!u) return null;
     if (/^https?:\/\//i.test(u)) return { url: u, auth: false };
+    if (!base) return null;                                                            // AEM-relative but no host → not checkable
     if (u.startsWith('/content/dam/')) return { url: base + encodeURI(u),          auth: true };
     if (u.startsWith('/content/'))     return { url: base + encodeURI(u) + '.html', auth: true };
     return null;
@@ -2716,13 +2745,14 @@ async function headCheckReport(reportRows, cfg) {
     while (idx < jobs.length) { const j = jobs[idx++]; await headOne(j); }
   }));
 
-  let notFound = 0, errors = 0;
+  let checked = 0, notFound = 0, errors = 0;
   for (const r of reportRows) {
     r.headStatus = r.newUrl ? (cache.get(r.newUrl) || 'not checked') : '';
+    if (/^\d{3}$/.test(r.headStatus)) checked++;                     // got a real HTTP status
     if (r.headStatus === '404') notFound++;
     else if (r.headStatus.startsWith('ERR')) errors++;
   }
-  return { checked: jobs.length, notFound, errors };
+  return { checked, notFound, errors };
 }
 
 // ── Migration QA report: per-reference verdict (dry-run of the fixers) ─────────
@@ -2776,8 +2806,307 @@ function qaResolveLink(url, ctx) {
   return null;   // internal-ok / other → correct or not a reportable reference
 }
 
-app.post('/api/link-checker/report', express.json({ limit: '1mb' }), (req, res) => {
+// Image / alt property names + asset-value test, shared by the a11y scan and the alt-text fixer.
+const A11Y_IMG = ['filereference', 'fileref', 'image', 'cardimage', 'ogimage', 'backgroundimage', 'mobileimage', 'desktopimage', 'imagereference'];
+const A11Y_ALT = ['alt', 'alttext', 'imagealttext', 'ctaalttext', 'alt-text'];
+const isImgAssetVal = v => /\/content\/dam\/|\/adobe\/assets\/|\.scene7\.com|\.(?:jpe?g|png|gif|webp|svg|avif|tiff?|bmp)(?:$|[?#"])/i.test(v || '');
+
+// A value that points at an actual raster/vector image (has an image extension, or is a
+// Scene7 image URL). Stricter than isImgAssetVal so PDFs / content fragments are excluded.
+const isImageRef = v => /\.(?:jpe?g|png|gif|webp|svg|avif|tiff?|bmp)(?:[?#&"]|$)/i.test(v || '') || /\.scene7\.com|\/is\/image\//i.test(v || '');
+
+// Per the AbbVie EDS convention, an image's alt lives in a SIBLING property named
+// "<imageProp>Alt" (e.g. image→imageAlt, background→backgroundAlt, backgroundImage→
+// backgroundImageAlt). Returns one entry per image-reference property on a node:
+// { prop (raw name), value, altKey (lowercased sibling), altRaw (sibling to write), altValue }.
+function imageAltProps(attrs, raw) {
+  const SKIP = new Set(['href', 'link', 'ctalink', 'url', 'linkurl', 'link-url']);
+  const list = [];
+  for (const ln in attrs) {
+    if (/(?:alt|caption)$/i.test(ln) || SKIP.has(ln)) continue;
+    if (!isImageRef(attrs[ln])) continue;
+    const rawName = raw[ln] || ln;
+    list.push({ prop: rawName, value: attrs[ln], altKey: ln + 'alt', altRaw: rawName + 'Alt', altValue: attrs[ln + 'alt'] });
+  }
+  return list;
+}
+
+// Static accessibility scan of a Franklin block region: flags authored a11y gaps —
+// missing/empty image alt (component nodes + rich-text <img>), controls with no
+// accessible name, and vague link text. Heuristic + component-property-name based.
+function qaAccessibility(xml) {
+  const findings = [];
+  const CAPTION = ['caption', 'imagecaption', 'imgcaption', 'figcaption', 'captiontext', 'imagecaptiontext'];
+  const TEXT = ['text', 'ctatext', 'title', 'linktext', 'label', 'buttontext', 'linklabel'];
+  const ARIA = ['arialabel', 'aria-label'];
+  const ICON = ['icon', 'ctaicon', 'iconname'];
+  const LINK = ['href', 'link', 'ctalink', 'url', 'linkurl', 'link-url'];
+  const VAGUE = new Set(['click here', 'read more', 'learn more', 'more', 'here', 'link', 'read', 'click', 'this link', 'details', 'view', 'see more', 'find out more', 'continue']);
+  const fileOf = v => { try { return decodeURIComponent((v || '').split(/[?#]/)[0].split('/').filter(Boolean).pop() || ''); } catch { return (v || '').split('/').pop(); } };
+
+  const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)\s*\/?>/g;
+  let m;
+  while ((m = elRe.exec(xml))) {
+    const node = m[1];
+    const attrs = {}, raw = {};
+    let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
+    while ((a = aRe.exec(m[2]))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
+    const nonEmpty = list => list.find(k => (attrs[k] || '').trim());
+    const present  = list => list.find(k => attrs[k] !== undefined);
+    const decorative = /^(presentation|none)$/i.test(attrs.role || '') || attrs.decorative === 'true';
+
+    const imgItems = imageAltProps(attrs, raw);
+    if (imgItems.length) {
+      const genericAlt = (attrs.alt || '').trim();     // some blocks may still use a plain `alt`
+      for (const it of imgItems) {
+        if (decorative) continue;
+        if ((it.altValue || '').trim() || genericAlt) continue;      // already labelled (via <prop>Alt or plain alt)
+        const altDefined = it.altValue !== undefined;
+        findings.push({ node, issue: altDefined ? 'empty alt text' : 'missing alt text', asset: fileOf(it.value), prop: it.prop, value: it.value });
+      }
+      // Caption lost in migration: a caption field is present but blank.
+      const capKey = present(CAPTION);
+      if (capKey && !(attrs[capKey] || '').trim())
+        findings.push({ node, issue: 'empty caption', asset: fileOf(imgItems[0].value), prop: raw[capKey] || capKey, value: imgItems[0].value });
+    }
+
+    const hasLink = LINK.find(k => attrs[k] && /^(?:\/|https?:|#)/.test(attrs[k]));
+    const hasIcon = nonEmpty(ICON);
+    const interactive = /button|cta|link/i.test(node) || /button|cta/i.test(attrs['sling:resourcetype'] || '') || hasLink || hasIcon;
+    if (interactive) {
+      const labelKey = nonEmpty(TEXT);
+      const target = hasLink ? attrs[hasLink] : '';
+      if ((hasIcon || hasLink) && !labelKey && !nonEmpty(ARIA))
+        findings.push({ node, issue: 'control has no accessible label', asset: '', prop: hasIcon ? (raw[nonEmpty(ICON)] || 'icon') : (raw[hasLink] || 'href'), value: hasIcon ? `icon "${attrs[nonEmpty(ICON)]}" — no visible text or aria-label` : `${target} — no link text or aria-label` });
+      if (labelKey && VAGUE.has((attrs[labelKey] || '').trim().toLowerCase()))
+        findings.push({ node, issue: 'vague link text', asset: '', prop: raw[labelKey] || labelKey, value: `"${attrs[labelKey]}"${target ? ` → ${target}` : ''}` });
+    }
+  }
+
+  // Rich-text passes (entity-encoded HTML inside RTE values).
+  const decoded = xml.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+  for (const im of decoded.matchAll(/<img\b[^>]*>/gi)) {
+    const alt = im[0].match(/\balt\s*=\s*"([^"]*)"/i);
+    const src = im[0].match(/\bsrc\s*=\s*"([^"]*)"/i)?.[1] || '';
+    if (!alt || !alt[1].trim())
+      findings.push({ node: 'img (rich text)', issue: alt ? 'empty alt text' : 'missing alt text', asset: fileOf(src), prop: 'src', value: src });
+  }
+  // Rich-text <figure> with no <figcaption> → uncaptioned figure.
+  for (const fig of decoded.matchAll(/<figure\b[^>]*>[\s\S]*?<\/figure>/gi)) {
+    if (!/<figcaption\b/i.test(fig[0])) {
+      const src = fig[0].match(/<img\b[^>]*\bsrc\s*=\s*"([^"]*)"/i)?.[1] || '';
+      findings.push({ node: 'figure (rich text)', issue: 'missing caption', asset: fileOf(src), prop: 'figure', value: src || '(figure with no figcaption)' });
+    }
+  }
+  return findings;
+}
+
+// ── Alt-text auto-fix (from DAM metadata dc:title) ─────────────────────────────
+// Resolve an image value (DM Open API URL or /content/dam path) to its /content/dam
+// path using the asset-map CSV (by UUID or direct path). Returns null if unresolvable.
+function altResolveDamPath(value, uuidToRow, damNorm) {
+  const urn = (value || '').match(/urn:aaid:aem:([0-9a-f-]{36})/i);
+  if (urn) { const row = uuidToRow.get(urn[1].toLowerCase()); if (row && row.path) return row.path; return null; }
+  const damPath = damPathOf(value);
+  if (!damPath) return null;
+  let clean = damPath.split('?')[0].split('#')[0].replace(/\/_jcr_content\/renditions\/.*$/, '').replace(/\.coreimg.*$/, '');
+  return damNorm ? normalizeDamPrefix(clean, damNorm.correctRoot, damNorm.oldRoots) : clean;
+}
+
+// Escape a string for use inside a double-quoted XML attribute.
+function xmlAttrEscape(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/\s+/g, ' ').trim();
+}
+
+// GET <host><damPath>/jcr:content/metadata.json for each dam path and return
+// Map(damPath -> dc:title|null). Deduped; concurrency-limited.
+async function fetchDamTitles(damPaths, cfg) {
+  const base = (cfg.host || '').replace(/\/$/, '');
+  const map = new Map();
+  if (!base) { for (const dp of damPaths) map.set(dp, null); return map; }
+  const arr = [...damPaths], CONC = 10;
+  let idx = 0;
+  await Promise.all(Array.from({ length: Math.min(CONC, arr.length) }, async () => {
+    while (idx < arr.length) {
+      const dp = arr[idx++];
+      try {
+        const resp = await axios.get(base + encodeURI(dp) + '/jcr:content/metadata.json', {
+          timeout: 8000, httpsAgent, validateStatus: () => true,
+          auth: { username: cfg.username || '', password: cfg.password || '' },
+        });
+        let t = null;
+        if (resp.status === 200 && resp.data && typeof resp.data === 'object') {
+          let dc = resp.data['dc:title'];
+          if (Array.isArray(dc)) dc = dc[0];
+          if (typeof dc === 'string' && dc.trim()) t = dc.trim().replace(/\s+/g, ' ');
+        }
+        map.set(dp, t);
+      } catch { map.set(dp, null); }
+    }
+  }));
+  return map;
+}
+
+// Inject the alt into each image property's sibling "<imageProp>Alt" (AbbVie convention),
+// using altByValue (image value -> alt text). Skips decorative images and props that
+// already have a non-empty alt (or a plain `alt`). Fills an existing empty <prop>Alt or
+// adds a fresh attribute.
+function qaFixAltText(xml, altByValue) {
+  const changes = [];
+  const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const result = xml.replace(elRe, (full, node, attrStr, tail) => {
+    const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
+    while ((a = aRe.exec(attrStr))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
+    if (/^(presentation|none)$/i.test(attrs.role || '') || attrs.decorative === 'true') return full;
+    const genericAlt = (attrs.alt || '').trim();
+    let out = attrStr, changed = false;
+    for (const it of imageAltProps(attrs, raw)) {
+      if ((it.altValue || '').trim() || genericAlt) continue;                 // already labelled
+      const title = altByValue.get(it.value);
+      if (!title) continue;
+      const val = xmlAttrEscape(title);
+      if (it.altValue !== undefined)                                          // empty <prop>Alt exists → set it
+        out = out.replace(new RegExp('(\\s' + esc(it.altKey) + '=")[^"]*(")', 'i'), `$1${val}$2`);
+      else                                                                    // add a fresh <prop>Alt
+        out += ` ${it.altRaw}="${val}"`;
+      changes.push({ node, value: it.value, prop: it.prop, altProp: it.altRaw, alt: title });
+      changed = true;
+    }
+    return changed ? `<${node}${out}${tail}>` : full;
+  });
+  return { result, changes };
+}
+
+// Build a patched ZIP that only injects alt text (same inner/outer handling as buildQaFixedZip).
+async function buildAltFixedZip(buffer, altByValue) {
+  const outerAdm   = new AdmZip(buffer);
+  const innerEntry = outerAdm.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
+  const changes = [];
+  let pagesFixed = 0;
+
+  async function patch(adm) {
+    const jsz = new JSZip();
+    for (const e of adm.getEntries()) {
+      if (e.isDirectory) continue;
+      const name = e.entryName;
+      if (name.endsWith('.xml') && !lcIsSkipped(name)) {
+        const before = e.getData().toString('utf8');
+        if (isFranklinPage(before)) {
+          const file = name.replace(/^jcr_root/, '');
+          const { before: pre, region, after: post, protectedVals } = franklinBlockRegion(before);
+          const r = qaFixAltText(region, altByValue);
+          const after = pre + unmaskProtected(r.result, protectedVals) + post;
+          for (const ch of r.changes) changes.push({ file, ...ch });
+          if (after !== before) pagesFixed++;
+          jsz.file(name, after);
+          continue;
+        }
+      }
+      jsz.file(name, e.getData());
+    }
+    return jsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  }
+
+  if (innerEntry) {
+    const patchedInner = await patch(new AdmZip(innerEntry.getData()));
+    const outerJsz = new JSZip();
+    for (const e of outerAdm.getEntries()) {
+      if (e.isDirectory) continue;
+      outerJsz.file(e.entryName, e.entryName === innerEntry.entryName ? patchedInner : e.getData());
+    }
+    return { buf: await outerJsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), changes, pagesFixed };
+  }
+  return { buf: await patch(outerAdm), changes, pagesFixed };
+}
+
+// Shared alt-fill computation: scan the package for missing-alt component images,
+// resolve each to a /content/dam path, fetch metadata dc:title, and build
+// altByValue (image value -> alt text). Returns { altByValue, missingTotal, skips }.
+async function computeAltFills(buffer, uuidToRow, damNorm, hostCfg) {
+  const outer = new AdmZip(buffer);
+  const innerE = outer.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
+  const zip = innerE ? new AdmZip(innerE.getData()) : outer;
+
+  const valueToDam = new Map();
+  const skips = new Map();
+  const addSkip = (reason, asset) => { if (!skips.has(reason)) skips.set(reason, new Set()); skips.get(reason).add(asset); };
+  let missingTotal = 0;
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory || !entry.entryName.endsWith('.xml') || lcIsSkipped(entry.entryName)) continue;
+    let content; try { content = entry.getData().toString('utf8'); } catch { continue; }
+    if (!isFranklinPage(content)) continue;
+    for (const f of qaAccessibility(franklinBlockRegion(content).region)) {
+      if (!/alt text/.test(f.issue)) continue;
+      missingTotal++;
+      if (/rich text/.test(f.node)) { addSkip('rich-text image — fix alt manually', f.asset || f.value); continue; }
+      const dam = altResolveDamPath(f.value, uuidToRow, damNorm);
+      if (!dam) { addSkip('not in asset-map (cannot locate /content/dam path)', f.asset || f.value); continue; }
+      valueToDam.set(f.value, dam);
+    }
+  }
+
+  const titleByDam = await fetchDamTitles(new Set(valueToDam.values()), hostCfg);
+  const altByValue = new Map();
+  for (const [value, dam] of valueToDam) {
+    const t = titleByDam.get(dam);
+    if (t) altByValue.set(value, t);
+    else addSkip('no dc:title in asset metadata', dam);
+  }
+  return { altByValue, missingTotal, skips };
+}
+
+// POST /api/link-checker/fix-alt — fill missing image alt text from DAM metadata dc:title.
+// Flow: find missing-alt component images → resolve DM URL / dam path via CSV → GET the
+// asset's metadata.json on the env's AEM author → use dc:title as alt → patched ZIP + report.
+app.post('/api/link-checker/fix-alt', express.json({ limit: '1mb' }), async (req, res) => {
   const { sessionId, siteRoot, env } = req.body;
+  const buffer = lcSessions.get(sessionId);
+  if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
+  if (!siteRoot || !siteRoot.startsWith('/content/')) return res.status(400).json({ error: 'Enter a valid site root.' });
+  if (!env || !fs.existsSync(csvPath(env))) return res.status(400).json({ error: 'Select a target environment with an asset-map CSV — needed to map the DM URL back to a /content/dam path.' });
+
+  try {
+    const rows = parse(fs.readFileSync(csvPath(env), 'utf8'), { columns: true, skip_empty_lines: true });
+    const uuidToRow = new Map(rows.filter(r => r.uuid && r.path).map(r => [r.uuid.toLowerCase(), r]));
+    const se = loadSiteConfig().environments.find(e => e.name === env);
+    const damNorm = { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
+    const host = se?.aemUrl || appConfig?.target?.host;
+    if (!host) return res.status(400).json({ error: `Environment "${env}" has no AEM host to read metadata from.` });
+
+    const { altByValue, missingTotal, skips } = await computeAltFills(buffer, uuidToRow, damNorm,
+      { host, username: appConfig?.target?.username, password: appConfig?.target?.password });
+
+    const { buf, changes, pagesFixed } = await buildAltFixedZip(buffer, altByValue);
+
+    // Change report CSV.
+    const reportRows = changes.map(c => ({ file: c.file, node: c.node, altProp: c.altProp, image: c.value, alt: c.alt, status: 'alt filled' }));
+    for (const [reason, set] of skips) for (const asset of set) reportRows.push({ file: '', node: '', altProp: '', image: asset, alt: '', status: reason });
+    const reportCsv = stringify(reportRows, { header: true, columns: [
+      { key: 'file', header: 'file' }, { key: 'node', header: 'component' }, { key: 'altProp', header: 'alt_property' },
+      { key: 'image', header: 'image' }, { key: 'alt', header: 'alt_text' }, { key: 'status', header: 'status' },
+    ] });
+    const reportId = randomUUID();
+    lcReports.set(reportId, reportCsv);
+    setTimeout(() => lcReports.delete(reportId), 15 * 60 * 1000).unref?.();
+
+    if (changes.length) lcSessions.set(sessionId, buf);   // chain so a re-scan reflects the filled alts
+    const skippedCount = [...skips.values()].reduce((s, set) => s + set.size, 0);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="alt-fixed-package.zip"');
+    res.setHeader('X-Pages-Fixed',  String(pagesFixed));
+    res.setHeader('X-Alt-Filled',   String(changes.length));
+    res.setHeader('X-Alt-Skipped',  String(skippedCount));
+    res.setHeader('X-Missing-Total', String(missingTotal));
+    res.setHeader('X-Report-Id',    reportId);
+    res.send(buf);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/link-checker/report', express.json({ limit: '1mb' }), async (req, res) => {
+  const { sessionId, siteRoot, env, validate } = req.body;
   const buffer = lcSessions.get(sessionId);
   if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
   if (!siteRoot || !siteRoot.startsWith('/content/')) return res.status(400).json({ error: 'Enter a valid site root.' });
@@ -2785,11 +3114,11 @@ app.post('/api/link-checker/report', express.json({ limit: '1mb' }), (req, res) 
 
   try {
     let pathMap = null, scene7Map = null, damNorm = null;
+    const se = env ? loadSiteConfig().environments.find(e => e.name === env) : null;
     if (env && fs.existsSync(csvPath(env))) {
       const rows = parse(fs.readFileSync(csvPath(env), 'utf8'), { columns: true, skip_empty_lines: true });
       pathMap   = new Map(rows.filter(r => r.path && r.openApiUrl).map(r => [r.path, r]));
       scene7Map = buildScene7LookupMap(rows);
-      const se  = loadSiteConfig().environments.find(e => e.name === env);
       damNorm   = { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
     }
     const localeRoots = loadLocaleRoots();
@@ -2799,7 +3128,7 @@ app.post('/api/link-checker/report', express.json({ limit: '1mb' }), (req, res) 
     const zip   = inner ? new AdmZip(inner.getData()) : outer;
 
     const agg = new Map();
-    const summary = { fix: 0, ok: 0, warn: 0, cant: 0, skip: 0 };
+    const summary = { fix: 0, ok: 0, warn: 0, cant: 0, skip: 0, a11y: 0 };
     let pagesScanned = 0;
     for (const entry of zip.getEntries()) {
       if (entry.isDirectory || !entry.entryName.endsWith('.xml')) continue;
@@ -2807,8 +3136,9 @@ app.post('/api/link-checker/report', express.json({ limit: '1mb' }), (req, res) 
       if (!isFranklinPage(content) || lcIsSkipped(entry.entryName)) continue;
       pagesScanned++;
       const file = entry.entryName.replace(/^jcr_root/, '');
+      const region = franklinBlockRegion(content).region;
       const ctx = { R, pathMap, scene7Map, damNorm, pageIsLM: /\/language-masters\//i.test(entry.entryName), pageLocaleRoot: qaLocaleRootOf(file, R), localeRoots };
-      for (const url of extractLinks(franklinBlockRegion(content).region)) {
+      for (const url of extractLinks(region)) {
         const r = qaResolveLink(url, ctx);
         if (!r) continue;
         summary[r.cls]++;
@@ -2816,14 +3146,114 @@ app.post('/api/link-checker/report', express.json({ limit: '1mb' }), (req, res) 
         if (!agg.has(key)) agg.set(key, { check: r.check, current: url, newUrl: r.newUrl, verdict: r.verdict, cls: r.cls, count: 0, pages: new Set() });
         const a = agg.get(key); a.count++; a.pages.add(file);
       }
+      for (const f of qaAccessibility(region)) {
+        summary.a11y++;
+        const detail = f.prop ? `${f.prop}="${f.value}"` : f.value;
+        const key = 'accessibility|' + f.issue + '|' + f.node + '|' + f.value;
+        if (!agg.has(key)) agg.set(key, { check: 'accessibility', current: `${f.node} — ${detail}`, newUrl: '', verdict: f.issue, cls: 'a11y', count: 0, pages: new Set() });
+        const a = agg.get(key); a.count++; a.pages.add(file);
+      }
     }
 
-    const order = { cant: 0, warn: 1, fix: 2, skip: 3, ok: 4 };
+    const order = { cant: 0, a11y: 1, warn: 2, fix: 3, skip: 4, ok: 5 };
     const rows = [...agg.values()]
-      .map(a => ({ check: a.check, current: a.current, newUrl: a.newUrl, verdict: a.verdict, cls: a.cls, count: a.count, files: a.pages.size, sample: [...a.pages].slice(0, 3) }))
+      .map(a => ({ check: a.check, current: a.current, newUrl: a.newUrl, verdict: a.verdict, cls: a.cls, count: a.count, files: a.pages.size, sample: [...a.pages].slice(0, 3), headStatus: '' }))
       .sort((x, y) => (order[x.cls] - order[y.cls]) || (y.count - x.count));
 
-    res.json({ siteRoot: R, env: env || '', csvExists: !!pathMap, pagesScanned, summary, total: rows.length, rows });
+    let validatedCounts = { checked: 0, broken: 0, errors: 0 };
+    if (validate) {
+      // Validate the fix target (or, for already-DM rows, the current URL) against AEM / DM.
+      const vrows = rows.map(r => ({ newUrl: r.newUrl || (r.cls === 'ok' ? r.current : ''), _ref: r }));
+      const summ  = await headCheckReport(vrows, { aemHost: se?.aemUrl, username: appConfig?.target?.username, password: appConfig?.target?.password });
+      vrows.forEach(v => { v._ref.headStatus = v.headStatus || ''; });
+      validatedCounts = { checked: summ.checked, broken: summ.notFound, errors: summ.errors };
+    }
+
+    res.json({ siteRoot: R, env: env || '', csvExists: !!pathMap, validated: !!validate, pagesScanned, summary, validatedCounts, total: rows.length, rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── On-demand live-URL (404) validation ───────────────────────────────────────
+// Runs AFTER the author classifies absolute domains: `internalDomains` decides which
+// absolute URLs are internal (rewritten to an AEM path & checked there) vs external
+// (skipped). Every other reference is validated at its fix target (or, for already-DM
+// refs, the current URL). HEAD/GET via headCheckReport using the env's AEM creds.
+app.post('/api/link-checker/validate', express.json({ limit: '1mb' }), async (req, res) => {
+  const { sessionId, siteRoot, env, internalDomains } = req.body;
+  const buffer = lcSessions.get(sessionId);
+  if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
+  if (!siteRoot || !siteRoot.startsWith('/content/')) return res.status(400).json({ error: 'Enter a valid site root.' });
+  const R = siteRoot.replace(/\/$/, '');
+  const internal = new Set((internalDomains || []).map(h => String(h).toLowerCase()));
+
+  try {
+    let pathMap = null, scene7Map = null, damNorm = null;
+    const se = env ? loadSiteConfig().environments.find(e => e.name === env) : null;
+    if (env && fs.existsSync(csvPath(env))) {
+      const rows = parse(fs.readFileSync(csvPath(env), 'utf8'), { columns: true, skip_empty_lines: true });
+      pathMap   = new Map(rows.filter(r => r.path && r.openApiUrl).map(r => [r.path, r]));
+      scene7Map = buildScene7LookupMap(rows);
+      damNorm   = { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
+    }
+    const localeRoots = loadLocaleRoots();
+
+    const outer = new AdmZip(buffer);
+    const inner = outer.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
+    const zip   = inner ? new AdmZip(inner.getData()) : outer;
+
+    const valAgg = new Map();   // target -> { newUrl, current, check, count, files:Set }
+    let pagesScanned = 0;
+    for (const entry of zip.getEntries()) {
+      if (entry.isDirectory || !entry.entryName.endsWith('.xml')) continue;
+      let content; try { content = entry.getData().toString('utf8'); } catch { continue; }
+      if (!isFranklinPage(content) || lcIsSkipped(entry.entryName)) continue;
+      pagesScanned++;
+      const file = entry.entryName.replace(/^jcr_root/, '');
+      const pageIsLM = /\/language-masters\//i.test(entry.entryName);
+      const region = franklinBlockRegion(content).region;
+      const ctx = { R, pathMap, scene7Map, damNorm, pageIsLM, pageLocaleRoot: qaLocaleRootOf(file, R), localeRoots };
+
+      for (const url of extractLinks(region)) {
+        const kind = qaClassify(url, R, pageIsLM);
+        let target = '', check = kind;
+        if (kind === 'absolute') {
+          const host = qaHost(url);
+          if (!host || !internal.has(host.toLowerCase())) continue;   // external / unclassified → not validated
+          const tail = (url.replace(/^https?:\/\/[^/]+/i, '').replace(/\.html?$/i, '') || '/');
+          target = tail.startsWith('/content/') ? tail : joinWithPrefix(R, tail);
+          check = 'absolute';
+        } else {
+          const rr = qaResolveLink(url, ctx);
+          if (!rr) continue;
+          target = rr.newUrl || (rr.cls === 'ok' ? url : '');
+          check = rr.check;
+        }
+        if (!target) continue;
+        if (!valAgg.has(target)) valAgg.set(target, { newUrl: target, current: url, check, count: 0, files: new Set() });
+        const v = valAgg.get(target); v.count++; v.files.add(file);
+      }
+    }
+
+    const valRows = [...valAgg.values()];
+    const summ = await headCheckReport(valRows, { aemHost: se?.aemUrl, username: appConfig?.target?.username, password: appConfig?.target?.password });
+
+    const rank = s => /^40[34]/.test(s) ? 0 : (s || '').startsWith('ERR') ? 1 : /^[45]\d\d/.test(s) ? 2 : /^3\d\d/.test(s) ? 3 : /^2\d\d/.test(s) ? 5 : 4;
+    const toRow = v => ({ current: v.current, newUrl: v.newUrl, headStatus: v.headStatus, check: v.check, count: v.count, files: v.files.size });
+    const links = valRows
+      .filter(v => v.headStatus && v.headStatus !== 'not checkable')     // actually HEAD-checked (excludes AEM-relative skipped without a host)
+      .map(toRow)
+      .sort((a, b) => rank(a.headStatus) - rank(b.headStatus) || b.count - a.count);
+    const brokenLinks = links.filter(b => /^40[34]/.test(b.headStatus) || b.headStatus.startsWith('ERR'));
+    const skipped = valRows.filter(v => v.headStatus === 'not checkable').reduce((s, v) => s + 1, 0);
+
+    res.json({
+      siteRoot: R, env: env || '', pagesScanned,
+      hasAem: !!se?.aemUrl,
+      validatedCounts: { checked: summ.checked, broken: summ.notFound, errors: summ.errors, skipped },
+      links, brokenLinks,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
