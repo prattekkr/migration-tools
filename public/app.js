@@ -1476,13 +1476,22 @@ function lcRenderBroken(data) {
     `<strong class="${c.broken ? 'text-danger' : 'text-success'}">${c.broken} not found (404)</strong>, ` +
     `${c.errors} unreachable${c.skipped ? `, ${c.skipped} not checkable` : ''}.</div>`;
 
+  const pageOf = p => p.replace(/\/(?:_?jcr_content\/.*|\.content\.xml)$/i, '') || p;
+  const pageList = b => {
+    const pages = (b.pages || []).map(pageOf);
+    if (!pages.length) return '';
+    const more = b.files > pages.length ? ` <span class="text-muted">+${b.files - pages.length} more</span>` : '';
+    return `<div class="small text-muted ms-5 mb-1" style="margin-top:-2px">on: ` +
+      pages.map(p => `<code class="text-secondary" style="word-break:break-all">${escHtml(p)}</code>`).join('<span class="mx-1">·</span>') + more + `</div>`;
+  };
   const rows = links.length ? links.map(b => `
-      <div class="d-flex align-items-center gap-2 py-1 border-top">
+      <div class="d-flex align-items-center gap-2 pt-1 border-top">
         ${lcStatusBadge(b.headStatus)}
         <span class="badge bg-light text-dark border text-nowrap">${escHtml(b.check)}</span>
         <code class="small flex-grow-1" style="word-break:break-all">${escHtml(b.newUrl)}</code>
         <span class="text-muted small text-nowrap">${b.count}× · ${b.files} pg</span>
-      </div>`).join('')
+      </div>
+      ${pageList(b)}`).join('')
     : '<div class="text-muted small">No checkable link targets found.</div>';
 
   document.getElementById('lcBrokenBody').innerHTML =

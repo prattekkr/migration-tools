@@ -3240,7 +3240,7 @@ app.post('/api/link-checker/validate', express.json({ limit: '1mb' }), async (re
     const summ = await headCheckReport(valRows, { aemHost: se?.aemUrl, username: appConfig?.target?.username, password: appConfig?.target?.password });
 
     const rank = s => /^40[34]/.test(s) ? 0 : (s || '').startsWith('ERR') ? 1 : /^[45]\d\d/.test(s) ? 2 : /^3\d\d/.test(s) ? 3 : /^2\d\d/.test(s) ? 5 : 4;
-    const toRow = v => ({ current: v.current, newUrl: v.newUrl, headStatus: v.headStatus, check: v.check, count: v.count, files: v.files.size });
+    const toRow = v => ({ current: v.current, newUrl: v.newUrl, headStatus: v.headStatus, check: v.check, count: v.count, files: v.files.size, pages: [...v.files].slice(0, 20) });
     const links = valRows
       .filter(v => v.headStatus && v.headStatus !== 'not checkable')     // actually HEAD-checked (excludes AEM-relative skipped without a host)
       .map(toRow)
