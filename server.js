@@ -1836,6 +1836,7 @@ function lcIsSkipped(name) {
   if (segs.includes('redirects')) return true;
   if (segs.includes('config')) return true;
   if (segs.includes('drafts') || segs.includes('draft') || segs.includes('preview')) return true;   // test/draft pages — not real content
+  if (segs.includes('nav')) return true;   // default nav/boilerplate content — not authored pages
   return false;
 }
 
