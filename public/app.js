@@ -1409,15 +1409,16 @@ function lcRenderUnresolvedAssets(data) {
   card.style.display = '';
   document.getElementById('lcUnresolvedCount').textContent = list.length;
   document.getElementById('lcUnresolvedBody').innerHTML = list.map(a => `
-    <div class="mb-2">
+    <div class="mb-3 pb-2 border-bottom">
       <div class="d-flex align-items-center gap-2 flex-wrap">
         <span class="badge bg-light text-dark border">${escHtml(a.check)}</span>
         <span class="badge bg-warning">${escHtml(a.verdict)}</span>
         <span class="text-muted small">${a.count} ref(s)</span>
       </div>
-      <div class="input-group input-group-sm mt-1" style="max-width:720px">
-        <span class="input-group-text" title="asset reference" style="max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><code>${escHtml(a.current)}</code></span>
-        <input type="text" class="form-control lc-cmap" data-from="${escHtml(a.current)}" placeholder="paste the DM Open API URL" />
+      <div class="small mt-1"><code style="word-break:break-all">${escHtml(a.current)}</code></div>
+      <div class="d-flex align-items-center gap-2 mt-1">
+        <i class="bi bi-arrow-return-right text-muted"></i>
+        <input type="text" class="form-control form-control-sm lc-cmap" data-from="${escHtml(a.current)}" placeholder="paste the DM Open API URL" style="width:100%" />
       </div>
     </div>`).join('') +
     '<div class="form-text">Leave blank to skip. Filled rows are applied when you click Fix all (or any asset Fix).</div>';
