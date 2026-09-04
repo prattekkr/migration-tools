@@ -422,14 +422,24 @@
         <button class="btn btn-sm btn-outline-secondary" onclick="ppSelectAll()">Select All</button>
         <button class="btn btn-sm btn-outline-secondary" onclick="ppDeselectAll()">Deselect All</button>
         <button class="btn btn-sm btn-outline-secondary" onclick="ppSelectMissingOnly()" title="Select only items where the node doesn't exist yet">Select Missing Only</button>
+        <div class="input-group input-group-sm" style="max-width:300px" title="Type one value and apply it to every row's New Value box">
+          <span class="input-group-text">Set all</span>
+          <input type="text" class="form-control" id="ppBulkValue" placeholder="one value for every row"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();ppFillAllNewValues();}" />
+          <button class="btn btn-outline-secondary" onclick="ppFillAllNewValues()">Apply</button>
+        </div>
         <input type="text" class="form-control form-control-sm" id="ppPageFilter"
-          placeholder="Filter items..." oninput="ppFilterPagesTable()" style="max-width:260px" />
+          placeholder="Filter items..." oninput="ppFilterPagesTable()" style="max-width:200px" />
         <span id="ppSelectionCount" class="text-muted small">0 items selected</span>
-        <div class="ms-auto">
+        <div class="ms-auto d-flex gap-2">
+          <button class="btn btn-outline-primary" onclick="ppDryRun()" id="ppDryRunBtn" title="Preview the old → new change on the selected rows without writing anything">
+            <i class="bi bi-eyeglasses me-1"></i>Dry Run
+          </button>
           <button class="btn btn-success px-4" onclick="ppRunUpdate()" id="ppRunBtn">
             <i class="bi bi-play-fill me-1"></i>Run Update
           </button>
         </div>
+        <div id="ppDrySummary" class="w-100 small"></div>
       </div>
       <div class="table-responsive pages-table-wrap" style="max-height:420px;overflow-y:auto">
         <table class="table table-sm table-hover align-middle mb-0" id="ppPagesTable">
@@ -438,8 +448,9 @@
               <th style="width:40px"><input type="checkbox" id="ppSelectAllChk" onchange="ppToggleAll(this)" /></th>
               <th>Path</th>
               <th style="width:110px">Node</th>
-              <th>Current Value</th>
-              <th style="width:90px">Status</th>
+              <th style="width:180px">Current (old) Value</th>
+              <th style="width:220px">New Value</th>
+              <th style="width:120px">Status</th>
             </tr>
           </thead>
           <tbody id="ppPagesBody"></tbody>
@@ -889,9 +900,11 @@
           <i class="bi bi-universal-access text-info"></i><strong>Accessibility</strong>
           <span class="badge bg-info ms-1" id="lcA11yCount">0</span>
           <span class="text-muted small ms-1">— missing/empty image alt text, lost captions, unlabeled controls, and vague link text, with the affected component, asset and pages. Advisory — fix these in the authored content.</span>
-          <button class="btn btn-sm btn-outline-success ms-auto" id="lcFillAltBtn" onclick="lcFixAlt()" title="Fetch each image's dc:title from its DAM metadata and write it as alt text"><i class="bi bi-magic me-1"></i>Fill alt text</button>
+          <button class="btn btn-sm btn-outline-success ms-auto" id="lcFillAltBtn" onclick="lcFixAlt()" title="Fetch each image's alt from its DAM metadata (dc:description → dc:title → filename) and write it as alt text"><i class="bi bi-magic me-1"></i>Fill alt text</button>
+          <button class="btn btn-sm btn-outline-success" id="lcFillCaptionBtn" onclick="lcFixCaption()" title="Fill the caption on custom-image blocks (only empty ones) from DAM metadata — same rule as alt text"><i class="bi bi-card-text me-1"></i>Fill captions</button>
           <button type="button" class="btn btn-sm btn-link text-muted p-0 ms-1" title="Collapse / expand" onclick="lcToggleCard(this)"><i class="bi bi-chevron-up"></i></button>
           <div id="lcAltStatus" class="small w-100 mt-1"></div>
+          <div id="lcCaptionStatus" class="small w-100"></div>
         </div>
         <div class="card-body lc-collapse" id="lcA11yBody"></div>
       </div>

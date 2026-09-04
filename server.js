@@ -1552,10 +1552,12 @@ function extractLinks(xmlContent) {
     links.push(url);
   };
 
-  // Quoted attribute values that ARE a single /content/... path — capture the WHOLE value,
-  // allowing spaces (AEM asset filenames can contain them, e.g. "Woman standing at desk.jpg").
-  // Runs first so spaced asset paths are captured in full before the whitespace-terminated passes.
+  // Quoted attribute values that ARE a single /content/... path OR http(s) URL — capture the
+  // WHOLE value, allowing spaces (AEM asset filenames can contain them, e.g.
+  // "Woman standing at desk.jpg" or ".../as/great-place to-work.png"). Runs first so spaced
+  // paths/URLs are captured in full before the whitespace-terminated passes below.
   for (const m of decoded.matchAll(/=(["'])(\/content\/[^"'<>]+)\1/g)) add(m[2]);
+  for (const m of decoded.matchAll(/=(["'])(https?:\/\/[^"'<>]+)\1/g)) add(m[2]);
 
   for (const m of decoded.matchAll(/["'\s=>(](\/(content)\/[^"'\s<>&\]{}|\\]+)/g)) add(m[1]);
   for (const m of decoded.matchAll(/["'\s=>(](https?:\/\/[^"'\s<>&\]{}|\\]+)/g)) add(m[1]);
@@ -1565,7 +1567,11 @@ function extractLinks(xmlContent) {
     add(p);
   }
 
-  return links;
+  // Drop whitespace-truncated prefixes: when a value has a space in its filename the
+  // whitespace-terminated passes above also capture the part before the space (e.g.
+  // ".../as/great-place" alongside the full ".../as/great-place to-work.png"). Remove any link
+  // that another captured link continues after a single space — that shorter one is a truncation.
+  return links.filter(l => !links.some(o => o !== l && o.startsWith(l + ' ')));
 }
 
 function classifyLink(url) {
@@ -2435,9 +2441,10 @@ function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which, customMap) {
 // Apply all QA fixes to every Franklin page in the ZIP (nested or flat).
 // Order: absolute → asset→DM → short-paths (so each step's output is safe for the next).
 async function buildQaFixedZip(buffer, opts) {
-  const { siteRoot, internalHosts, pathMap, scene7Map, damNorm, crossLocaleMappings, altByValue } = opts;
+  const { siteRoot, internalHosts, pathMap, scene7Map, damNorm, crossLocaleMappings, altByValue, captionByValue } = opts;
   const sel        = opts.checks || new Set(['shortPath', 'absolute', 'pdf', 'dam', 'scene7']);
   const doAlt      = sel.has('alt') && altByValue && altByValue.size > 0;
+  const doCaption  = sel.has('caption') && captionByValue && captionByValue.size > 0;
   const assetWhich = { pdf: sel.has('pdf'), dam: sel.has('dam'), scene7: sel.has('scene7') };
   const doAsset    = assetWhich.pdf || assetWhich.dam || assetWhich.scene7;
   const customMap  = new Map((opts.customAssetMappings || []).filter(m => m && m.from && m.to).map(m => [m.from, m.to]));
@@ -2458,6 +2465,7 @@ async function buildQaFixedZip(buffer, opts) {
           const { before: pre, region, after: post, protectedVals } = franklinBlockRegion(before);
           let body = region;   // fix authored blocks + content fields; cq:template/tags/MSM refs stay masked
           const al = doAlt ? qaFixAltText(body, altByValue) : { result: body, changes: [] };                                              body = al.result;   // alt first — matches original image values before asset conversion
+          const cp = doCaption ? qaFixCaption(body, captionByValue) : { result: body, changes: [] };                                       body = cp.result;   // caption also matches original image values
           const a = sel.has('absolute') ? qaFixAbsolute(body, siteRoot, internalHosts, damNorm) : { result: body, changes: [] };            body = a.result;
           const b = doAsset             ? qaFixAssetRefs(body, pathMap, scene7Map, damNorm, assetWhich, customMap) : { result: body, changes: [], unmatched: [] }; body = b.result;
           const c = sel.has('shortPath') ? qaFixShortPaths(body, siteRoot) : { result: body, changes: [] };                                  body = c.result;
@@ -2466,6 +2474,7 @@ async function buildQaFixedZip(buffer, opts) {
           body = unmaskProtected(body, protectedVals);   // restore cq:template/tags/MSM refs before writing back
           const after = pre + body + post;
           for (const ch of al.changes) changes.push({ file, type: 'alt-text', oldUrl: ch.value, newUrl: `${ch.altProp}="${ch.alt}"` });
+          for (const ch of cp.changes) changes.push({ file, type: 'caption',  oldUrl: ch.value, newUrl: `caption="${ch.caption}"` });
           for (const ch of a.changes) changes.push({ file, type: 'absolute',     ...ch });
           for (const ch of b.changes) changes.push({ file, type: 'asset-dm',     ...ch });
           for (const ch of c.changes) changes.push({ file, type: 'short-path',   ...ch });
@@ -2539,7 +2548,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
   const R = siteRoot.replace(/\/$/, '');
   const internalHosts = new Set((internalDomains || []).map(h => String(h).toLowerCase()));
   const sel      = new Set(Array.isArray(checks) && checks.length ? checks : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7']);
-  const needsCsv = sel.has('pdf') || sel.has('dam') || sel.has('scene7') || sel.has('alt');
+  const needsCsv = sel.has('pdf') || sel.has('dam') || sel.has('scene7') || sel.has('alt') || sel.has('caption');
 
   // Cross-locale prefix mappings: [{from, to}] — both must be /content/ paths. Longest source first.
   const crossLocaleMappings = (Array.isArray(req.body.crossLocaleMappings) ? req.body.crossLocaleMappings : [])
@@ -2593,18 +2602,17 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
       }
     }
 
-    // Alt-text auto-fill (when 'alt' is selected, e.g. Fix all): resolve missing-alt images
-    // to their /content/dam path and read metadata dc:title off the env's AEM author.
-    let altByValue = new Map();
-    if (sel.has('alt') && uuidToRow) {
+    // Alt-text + caption auto-fill (when selected, e.g. Fix all): resolve images to their
+    // /content/dam path and read metadata (description→title→filename) off the env's AEM author.
+    let altByValue = new Map(), captionByValue = new Map();
+    if ((sel.has('alt') || sel.has('caption')) && uuidToRow) {
       const host = se?.aemUrl || appConfig?.target?.host;
-      if (host) {
-        const alt = await computeAltFills(buffer, uuidToRow, damNorm, { host, username: appConfig?.target?.username, password: appConfig?.target?.password });
-        altByValue = alt.altByValue;
-      }
+      const hostCfg = { host, username: appConfig?.target?.username, password: appConfig?.target?.password };
+      if (host && sel.has('alt'))     altByValue     = (await computeAltFills(buffer, uuidToRow, damNorm, hostCfg)).altByValue;
+      if (host && sel.has('caption')) captionByValue = (await computeCaptionFills(buffer, uuidToRow, damNorm, hostCfg)).captionByValue;
     }
 
-    const { buf, changes, unmatched, pagesFixed } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue });
+    const { buf, changes, unmatched, pagesFixed } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue, captionByValue });
     lcSessions.set(sessionId, buf);   // keep session, chained on the fixed result (enables per-category iteration + re-scan)
 
     const reportRows = changes.map(c => ({
@@ -2716,17 +2724,19 @@ async function headCheckReport(reportRows, cfg) {
   //  /content/... (page)           → authHost + path + .html    (needs AEM host, renders the page node)
   const toTarget = u => {
     if (!u) return null;
-    if (/^https?:\/\//i.test(u)) return { url: u, auth: false };
+    if (/^https?:\/\//i.test(u)) return { url: u.replace(/ /g, '%20'), auth: false };   // encode literal spaces in asset filenames
     if (!base) return null;                                                            // AEM-relative but no host → not checkable
     if (u.startsWith('/content/dam/')) return { url: base + encodeURI(u),          auth: true };
     if (u.startsWith('/content/'))     return { url: base + encodeURI(u) + '.html', auth: true };
     return null;
   };
 
-  const cache = new Map();
+  const cache = new Map();       // newUrl -> status string
+  const urlCache = new Map();    // newUrl -> the actual absolute URL that was fetched
   const headOne = async (newUrl) => {
     const t = toTarget(newUrl);
     if (!t) { cache.set(newUrl, 'not checkable'); return; }
+    urlCache.set(newUrl, t.url);
     const opts = { timeout: 8000, maxRedirects: 0, httpsAgent, validateStatus: () => true };
     if (t.auth) opts.auth = { username: cfg.username || '', password: cfg.password || '' };
     try {
@@ -2748,6 +2758,7 @@ async function headCheckReport(reportRows, cfg) {
   let checked = 0, notFound = 0, errors = 0;
   for (const r of reportRows) {
     r.headStatus = r.newUrl ? (cache.get(r.newUrl) || 'not checked') : '';
+    r.checkedUrl = r.newUrl ? (urlCache.get(r.newUrl) || '') : '';       // the actual absolute URL that was requested
     if (/^\d{3}$/.test(r.headStatus)) checked++;                     // got a real HTTP status
     if (r.headStatus === '404') notFound++;
     else if (r.headStatus.startsWith('ERR')) errors++;
@@ -2831,12 +2842,18 @@ function imageAltProps(attrs, raw) {
   return list;
 }
 
+// The EDS custom-image block (node `custom_image`) carries a `caption` field. All blocks
+// share sling:resourceType=core/franklin/components/block/v1/block, so it's identified by
+// aueComponentId / model = "custom-image" (attr keys are lowercased by the parse loop).
+const isCustomImageNode = attrs => attrs['auecomponentid'] === 'custom-image' || attrs['model'] === 'custom-image';
+// Franklin boolean/typed values render as e.g. "{Boolean}true".
+const isDecorativeImage = attrs => /^(?:\{Boolean\})?true$/i.test(attrs.imageisdecorative || '') || /^(presentation|none)$/i.test(attrs.role || '') || attrs.decorative === 'true';
+
 // Static accessibility scan of a Franklin block region: flags authored a11y gaps —
 // missing/empty image alt (component nodes + rich-text <img>), controls with no
 // accessible name, and vague link text. Heuristic + component-property-name based.
 function qaAccessibility(xml) {
   const findings = [];
-  const CAPTION = ['caption', 'imagecaption', 'imgcaption', 'figcaption', 'captiontext', 'imagecaptiontext'];
   const TEXT = ['text', 'ctatext', 'title', 'linktext', 'label', 'buttontext', 'linklabel'];
   const ARIA = ['arialabel', 'aria-label'];
   const ICON = ['icon', 'ctaicon', 'iconname'];
@@ -2852,7 +2869,6 @@ function qaAccessibility(xml) {
     let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
     while ((a = aRe.exec(m[2]))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
     const nonEmpty = list => list.find(k => (attrs[k] || '').trim());
-    const present  = list => list.find(k => attrs[k] !== undefined);
     const decorative = /^(presentation|none)$/i.test(attrs.role || '') || attrs.decorative === 'true';
 
     const imgItems = imageAltProps(attrs, raw);
@@ -2864,10 +2880,9 @@ function qaAccessibility(xml) {
         const altDefined = it.altValue !== undefined;
         findings.push({ node, issue: altDefined ? 'empty alt text' : 'missing alt text', asset: fileOf(it.value), prop: it.prop, value: it.value });
       }
-      // Caption lost in migration: a caption field is present but blank.
-      const capKey = present(CAPTION);
-      if (capKey && !(attrs[capKey] || '').trim())
-        findings.push({ node, issue: 'empty caption', asset: fileOf(imgItems[0].value), prop: raw[capKey] || capKey, value: imgItems[0].value });
+      // Custom-image blocks require a caption — flag missing/empty ones (custom-image only).
+      if (isCustomImageNode(attrs) && !isDecorativeImage(attrs) && !(attrs.caption || '').trim())
+        findings.push({ node, issue: 'missing caption', asset: fileOf(imgItems[0].value), prop: 'caption', value: imgItems[0].value });
     }
 
     const hasLink = LINK.find(k => attrs[k] && /^(?:\/|https?:|#)/.test(attrs[k]));
@@ -2918,12 +2933,17 @@ function xmlAttrEscape(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/\s+/g, ' ').trim();
 }
 
-// GET <host><damPath>/jcr:content/metadata.json for each dam path and return
-// Map(damPath -> dc:title|null). Deduped; concurrency-limited.
-async function fetchDamTitles(damPaths, cfg) {
+// GET <host><damPath>/jcr:content/metadata.json for each dam path and resolve the alt
+// text with the AbbVie fallback chain (mirrors getAltTextFromDam):
+//   dc:description → dc:title → asset filename without extension.
+// The filename fallback only applies when the asset actually exists (metadata 200);
+// if the asset can't be reached the value is null (no alt). Deduped; concurrency-limited.
+async function fetchDamAltText(damPaths, cfg) {
   const base = (cfg.host || '').replace(/\/$/, '');
   const map = new Map();
   if (!base) { for (const dp of damPaths) map.set(dp, null); return map; }
+  const firstStr = v => { if (Array.isArray(v)) v = v[0]; return (typeof v === 'string' && v.trim()) ? v.trim().replace(/\s+/g, ' ') : ''; };
+  const fileBase = dp => { let n = (dp || '').split('/').pop() || ''; try { n = decodeURIComponent(n); } catch {} return n.replace(/\.[^.]+$/, ''); };
   const arr = [...damPaths], CONC = 10;
   let idx = 0;
   await Promise.all(Array.from({ length: Math.min(CONC, arr.length) }, async () => {
@@ -2934,13 +2954,12 @@ async function fetchDamTitles(damPaths, cfg) {
           timeout: 8000, httpsAgent, validateStatus: () => true,
           auth: { username: cfg.username || '', password: cfg.password || '' },
         });
-        let t = null;
         if (resp.status === 200 && resp.data && typeof resp.data === 'object') {
-          let dc = resp.data['dc:title'];
-          if (Array.isArray(dc)) dc = dc[0];
-          if (typeof dc === 'string' && dc.trim()) t = dc.trim().replace(/\s+/g, ' ');
+          const alt = firstStr(resp.data['dc:description']) || firstStr(resp.data['dc:title']) || fileBase(dp);
+          map.set(dp, alt || null);          // asset exists → description | title | filename
+        } else {
+          map.set(dp, null);                 // asset not found / unreachable → no alt
         }
-        map.set(dp, t);
       } catch { map.set(dp, null); }
     }
   }));
@@ -2978,8 +2997,32 @@ function qaFixAltText(xml, altByValue) {
   return { result, changes };
 }
 
-// Build a patched ZIP that only injects alt text (same inner/outer handling as buildQaFixedZip).
-async function buildAltFixedZip(buffer, altByValue) {
+// Fill `caption` on custom-image blocks (only) whose caption is empty/absent, using
+// captionByValue (image value -> caption text). Value chain is the same as alt.
+function qaFixCaption(xml, captionByValue) {
+  const changes = [];
+  const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
+  const result = xml.replace(elRe, (full, node, attrStr, tail) => {
+    const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
+    while ((a = aRe.exec(attrStr))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
+    if (!isCustomImageNode(attrs) || isDecorativeImage(attrs)) return full;
+    if ((attrs.caption || '').trim()) return full;                            // keep an existing caption
+    const item = imageAltProps(attrs, raw)[0];                               // the block's image ref
+    const text = item && captionByValue.get(item.value);
+    if (!text) return full;
+    const val = xmlAttrEscape(text);
+    const out = attrs.caption !== undefined
+      ? attrStr.replace(/(\scaption=")[^"]*(")/i, `$1${val}$2`)               // fill empty caption=""
+      : `${attrStr} caption="${val}"`;                                        // or add a fresh caption
+    changes.push({ node, value: item.value, prop: 'caption', caption: text });
+    return `<${node}${out}${tail}>`;
+  });
+  return { result, changes };
+}
+
+// Build a patched ZIP applying a single per-region fixer (same inner/outer handling as
+// buildQaFixedZip). fixerFn(region) -> { result, changes }.
+async function buildMetaFixedZip(buffer, fixerFn) {
   const outerAdm   = new AdmZip(buffer);
   const innerEntry = outerAdm.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
   const changes = [];
@@ -2995,7 +3038,7 @@ async function buildAltFixedZip(buffer, altByValue) {
         if (isFranklinPage(before)) {
           const file = name.replace(/^jcr_root/, '');
           const { before: pre, region, after: post, protectedVals } = franklinBlockRegion(before);
-          const r = qaFixAltText(region, altByValue);
+          const r = fixerFn(region);
           const after = pre + unmaskProtected(r.result, protectedVals) + post;
           for (const ch of r.changes) changes.push({ file, ...ch });
           if (after !== before) pagesFixed++;
@@ -3046,14 +3089,58 @@ async function computeAltFills(buffer, uuidToRow, damNorm, hostCfg) {
     }
   }
 
-  const titleByDam = await fetchDamTitles(new Set(valueToDam.values()), hostCfg);
+  const altByDam = await fetchDamAltText(new Set(valueToDam.values()), hostCfg);
   const altByValue = new Map();
   for (const [value, dam] of valueToDam) {
-    const t = titleByDam.get(dam);
+    const t = altByDam.get(dam);
     if (t) altByValue.set(value, t);
-    else addSkip('no dc:title in asset metadata', dam);
+    else addSkip('asset not found on AEM author (no metadata)', dam);
   }
   return { altByValue, missingTotal, skips };
+}
+
+// Caption-fill computation: scan the package for custom-image blocks with an empty caption,
+// resolve each block's image to a /content/dam path, fetch metadata, and build
+// captionByValue (image value -> caption text; same chain as alt). Returns
+// { captionByValue, candidateTotal, skips }.
+async function computeCaptionFills(buffer, uuidToRow, damNorm, hostCfg) {
+  const outer = new AdmZip(buffer);
+  const innerE = outer.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
+  const zip = innerE ? new AdmZip(innerE.getData()) : outer;
+
+  const valueToDam = new Map();
+  const skips = new Map();
+  const addSkip = (reason, asset) => { if (!skips.has(reason)) skips.set(reason, new Set()); skips.get(reason).add(asset); };
+  const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)\s*\/?>/g;
+  let candidateTotal = 0;
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory || !entry.entryName.endsWith('.xml') || lcIsSkipped(entry.entryName)) continue;
+    let content; try { content = entry.getData().toString('utf8'); } catch { continue; }
+    if (!isFranklinPage(content)) continue;
+    const region = franklinBlockRegion(content).region;
+    let m;
+    while ((m = elRe.exec(region))) {
+      const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
+      while ((a = aRe.exec(m[2]))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
+      if (!isCustomImageNode(attrs) || isDecorativeImage(attrs)) continue;
+      if ((attrs.caption || '').trim()) continue;                 // already captioned
+      const item = imageAltProps(attrs, raw)[0];
+      if (!item) continue;
+      candidateTotal++;
+      const dam = altResolveDamPath(item.value, uuidToRow, damNorm);
+      if (!dam) { addSkip('not in asset-map (cannot locate /content/dam path)', item.value); continue; }
+      valueToDam.set(item.value, dam);
+    }
+  }
+
+  const textByDam = await fetchDamAltText(new Set(valueToDam.values()), hostCfg);
+  const captionByValue = new Map();
+  for (const [value, dam] of valueToDam) {
+    const t = textByDam.get(dam);
+    if (t) captionByValue.set(value, t);
+    else addSkip('asset not found on AEM author (no metadata)', dam);
+  }
+  return { captionByValue, candidateTotal, skips };
 }
 
 // POST /api/link-checker/fix-alt — fill missing image alt text from DAM metadata dc:title.
@@ -3077,7 +3164,7 @@ app.post('/api/link-checker/fix-alt', express.json({ limit: '1mb' }), async (req
     const { altByValue, missingTotal, skips } = await computeAltFills(buffer, uuidToRow, damNorm,
       { host, username: appConfig?.target?.username, password: appConfig?.target?.password });
 
-    const { buf, changes, pagesFixed } = await buildAltFixedZip(buffer, altByValue);
+    const { buf, changes, pagesFixed } = await buildMetaFixedZip(buffer, region => qaFixAltText(region, altByValue));
 
     // Change report CSV.
     const reportRows = changes.map(c => ({ file: c.file, node: c.node, altProp: c.altProp, image: c.value, alt: c.alt, status: 'alt filled' }));
@@ -3099,6 +3186,53 @@ app.post('/api/link-checker/fix-alt', express.json({ limit: '1mb' }), async (req
     res.setHeader('X-Alt-Skipped',  String(skippedCount));
     res.setHeader('X-Missing-Total', String(missingTotal));
     res.setHeader('X-Report-Id',    reportId);
+    res.send(buf);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/link-checker/fix-caption — fill the `caption` on custom-image blocks (only)
+// whose caption is empty, using the same DAM-metadata chain as alt (description→title→filename).
+app.post('/api/link-checker/fix-caption', express.json({ limit: '1mb' }), async (req, res) => {
+  const { sessionId, siteRoot, env } = req.body;
+  const buffer = lcSessions.get(sessionId);
+  if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
+  if (!siteRoot || !siteRoot.startsWith('/content/')) return res.status(400).json({ error: 'Enter a valid site root.' });
+  if (!env || !fs.existsSync(csvPath(env))) return res.status(400).json({ error: 'Select a target environment with an asset-map CSV — needed to map the DM URL back to a /content/dam path.' });
+
+  try {
+    const rows = parse(fs.readFileSync(csvPath(env), 'utf8'), { columns: true, skip_empty_lines: true });
+    const uuidToRow = new Map(rows.filter(r => r.uuid && r.path).map(r => [r.uuid.toLowerCase(), r]));
+    const se = loadSiteConfig().environments.find(e => e.name === env);
+    const damNorm = { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
+    const host = se?.aemUrl || appConfig?.target?.host;
+    if (!host) return res.status(400).json({ error: `Environment "${env}" has no AEM host to read metadata from.` });
+
+    const { captionByValue, candidateTotal, skips } = await computeCaptionFills(buffer, uuidToRow, damNorm,
+      { host, username: appConfig?.target?.username, password: appConfig?.target?.password });
+
+    const { buf, changes, pagesFixed } = await buildMetaFixedZip(buffer, region => qaFixCaption(region, captionByValue));
+
+    const reportRows = changes.map(c => ({ file: c.file, node: c.node, image: c.value, caption: c.caption, status: 'caption filled' }));
+    for (const [reason, set] of skips) for (const asset of set) reportRows.push({ file: '', node: '', image: asset, caption: '', status: reason });
+    const reportCsv = stringify(reportRows, { header: true, columns: [
+      { key: 'file', header: 'file' }, { key: 'node', header: 'component' },
+      { key: 'image', header: 'image' }, { key: 'caption', header: 'caption' }, { key: 'status', header: 'status' },
+    ] });
+    const reportId = randomUUID();
+    lcReports.set(reportId, reportCsv);
+    setTimeout(() => lcReports.delete(reportId), 15 * 60 * 1000).unref?.();
+
+    if (changes.length) lcSessions.set(sessionId, buf);   // chain so a re-scan reflects the filled captions
+    const skippedCount = [...skips.values()].reduce((s, set) => s + set.size, 0);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="caption-fixed-package.zip"');
+    res.setHeader('X-Pages-Fixed',      String(pagesFixed));
+    res.setHeader('X-Caption-Filled',   String(changes.length));
+    res.setHeader('X-Caption-Skipped',  String(skippedCount));
+    res.setHeader('X-Candidate-Total',  String(candidateTotal));
+    res.setHeader('X-Report-Id',        reportId);
     res.send(buf);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3240,7 +3374,7 @@ app.post('/api/link-checker/validate', express.json({ limit: '1mb' }), async (re
     const summ = await headCheckReport(valRows, { aemHost: se?.aemUrl, username: appConfig?.target?.username, password: appConfig?.target?.password });
 
     const rank = s => /^40[34]/.test(s) ? 0 : (s || '').startsWith('ERR') ? 1 : /^[45]\d\d/.test(s) ? 2 : /^3\d\d/.test(s) ? 3 : /^2\d\d/.test(s) ? 5 : 4;
-    const toRow = v => ({ current: v.current, newUrl: v.newUrl, headStatus: v.headStatus, check: v.check, count: v.count, files: v.files.size, pages: [...v.files].slice(0, 20) });
+    const toRow = v => ({ current: v.current, newUrl: v.newUrl, checkedUrl: v.checkedUrl || '', headStatus: v.headStatus, check: v.check, count: v.count, files: v.files.size, pages: [...v.files].slice(0, 20) });
     const links = valRows
       .filter(v => v.headStatus && v.headStatus !== 'not checkable')     // actually HEAD-checked (excludes AEM-relative skipped without a host)
       .map(toRow)
@@ -3870,6 +4004,7 @@ app.get('/api/prop-updater/discover', async (req, res) => {
     const qbRes = await client.get('/bin/querybuilder.json', {
       params: {
         path: rootPath,
+        'path.self': true,           // include the root node itself, not just descendants (so a single leaf page also matches)
         type: ppQueryType(contentType),
         'p.limit': -1,
         'p.hits': 'selective',
@@ -3932,38 +4067,48 @@ app.get('/api/prop-updater/update/progress', (req, res) => {
 });
 
 app.post('/api/prop-updater/update/start', async (req, res) => {
-  const { selectedPaths, env, nodePattern, propertyName, propertyValue, valueType, contentType } = req.body;
+  const { updates, selectedPaths, env, nodePattern, propertyName, propertyValue, valueType, contentType } = req.body;
 
   if (ppJob.running) return res.status(409).json({ error: 'Update already in progress' });
-  if (!Array.isArray(selectedPaths) || !selectedPaths.length) return res.status(400).json({ error: 'No pages selected.' });
   if (!propertyName) return res.status(400).json({ error: 'Property name is required.' });
-  if (propertyValue === undefined || propertyValue === '') return res.status(400).json({ error: 'Property value is required.' });
+
+  // Per-path values (preferred — each page can get its own new value); fall back to a single
+  // global value applied to selectedPaths for backward compatibility.
+  let work = [];
+  if (Array.isArray(updates) && updates.length) {
+    work = updates
+      .filter(u => u && u.path && u.value !== undefined && String(u.value) !== '')
+      .map(u => ({ path: u.path, value: String(u.value) }));
+  } else if (Array.isArray(selectedPaths) && selectedPaths.length && propertyValue !== undefined && propertyValue !== '') {
+    work = selectedPaths.map(p => ({ path: p, value: String(propertyValue) }));
+  }
+  if (!work.length) return res.status(400).json({ error: 'No items with a value to update (enter a New Value on the selected rows).' });
 
   const resolved = ppResolveEnvCfg(env);
   if (resolved.error) return res.status(400).json({ error: resolved.error });
 
   const pattern = ppNormalizePattern(nodePattern, contentType);
-  ppJob = { running: true, total: selectedPaths.length, done: 0, errors: 0, log: [] };
-  res.json({ ok: true, total: selectedPaths.length });
+  ppJob = { running: true, total: work.length, done: 0, errors: 0, log: [] };
+  res.json({ ok: true, total: work.length });
   ppBroadcast();
 
   const client = makeClient(resolved.cfg);
   const CONCURRENCY = 5;
 
-  async function updateOnePage(pagePath) {
+  async function updateOnePage({ path, value }) {
     try {
       const params = new URLSearchParams();
-      appendConstant(params, propertyName, propertyValue, valueType);
-      await client.post(`${pagePath}/${pattern}`, params.toString(), {
+      appendConstant(params, propertyName, value, valueType);
+      await client.post(`${path}/${pattern}`, params.toString(), {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
-      ppJob.log.push({ pagePath, status: 'success' });
+      ppJob.log.push({ pagePath: path, status: 'success' });
     } catch (err) {
       ppJob.errors++;
       const errMsg = err.response?.data
         ? (typeof err.response.data === 'object' ? JSON.stringify(err.response.data) : err.response.data)
         : err.message;
-      ppJob.log.push({ pagePath, status: 'error', message: errMsg });
+      ppJob.log.push({ pagePath: path, status: 'error', message: errMsg });
     } finally {
       ppJob.done++;
       ppBroadcast();
@@ -3971,8 +4116,8 @@ app.post('/api/prop-updater/update/start', async (req, res) => {
   }
 
   (async () => {
-    for (let i = 0; i < selectedPaths.length; i += CONCURRENCY) {
-      await Promise.all(selectedPaths.slice(i, i + CONCURRENCY).map(updateOnePage));
+    for (let i = 0; i < work.length; i += CONCURRENCY) {
+      await Promise.all(work.slice(i, i + CONCURRENCY).map(updateOnePage));
     }
     ppJob.running = false;
     ppBroadcast();

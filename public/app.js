@@ -1484,14 +1484,17 @@ function lcRenderBroken(data) {
     return `<div class="small text-muted ms-5 mb-1" style="margin-top:-2px">on: ` +
       pages.map(p => `<code class="text-secondary" style="word-break:break-all">${escHtml(p)}</code>`).join('<span class="mx-1">·</span>') + more + `</div>`;
   };
-  const rows = links.length ? links.map(b => `
+  const rows = links.length ? links.map(b => {
+    const checked = b.checkedUrl || b.newUrl;      // the actual absolute URL that was HEAD-checked
+    return `
       <div class="d-flex align-items-center gap-2 pt-1 border-top">
         ${lcStatusBadge(b.headStatus)}
         <span class="badge bg-light text-dark border text-nowrap">${escHtml(b.check)}</span>
-        <code class="small flex-grow-1" style="word-break:break-all">${escHtml(b.newUrl)}</code>
+        <code class="small flex-grow-1" style="word-break:break-all">${escHtml(checked)}</code>
         <span class="text-muted small text-nowrap">${b.count}× · ${b.files} pg</span>
       </div>
-      ${pageList(b)}`).join('')
+      ${pageList(b)}`;
+  }).join('')
     : '<div class="text-muted small">No checkable link targets found.</div>';
 
   document.getElementById('lcBrokenBody').innerHTML =
@@ -1688,11 +1691,11 @@ async function lcFix(checks) {
   const status   = document.getElementById('lcFixStatus');
   status.className = 'small mt-2 text-muted'; status.textContent = 'Fixing…';
   try {
-    // checks === null → "Fix all": the 5 checks + image alt text, PLUS cross-locale when mappings are ready.
+    // checks === null → "Fix all": the 5 checks + image alt text + custom-image captions, PLUS cross-locale when ready.
     const mappings = lcCrossLocaleMappings();
     let sel = checks;
-    if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'crossLocale']
-                                    : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt'];
+    if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'crossLocale']
+                                    : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption'];
     const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel };
     if (sel.includes('crossLocale')) body.crossLocaleMappings = mappings;
     if (sel.some(c => c === 'pdf' || c === 'dam' || c === 'scene7')) body.customAssetMappings = lcCustomAssetMappings();
@@ -1751,6 +1754,40 @@ async function lcFixAlt() {
     await lcScan();   // refresh — session now holds the alt-filled package
   } catch (e) { status.className = 'small w-100 mt-1 text-danger'; status.textContent = e.message; }
   finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-magic me-1"></i>Fill alt text'; }
+}
+
+// Fill the caption on custom-image blocks (only empty ones) from DAM metadata — separate action.
+async function lcFixCaption() {
+  if (!lcSessionId) { alert('Scan first.'); return; }
+  const siteRoot = document.getElementById('lcSiteRoot').value.trim();
+  const env      = document.getElementById('lcEnv').value;
+  const btn      = document.getElementById('lcFillCaptionBtn');
+  const status   = document.getElementById('lcCaptionStatus');
+  if (!env) { status.className = 'small w-100 text-danger'; status.textContent = 'Select a target environment first — needed to read the DAM metadata.'; return; }
+  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Filling…';
+  status.className = 'small w-100 text-muted';
+  status.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Filling custom-image captions from asset metadata…';
+  try {
+    const res = await fetch('/api/link-checker/fix-caption', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env }),
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Caption fill failed'); }
+    const filled  = res.headers.get('X-Caption-Filled');
+    const skipped = res.headers.get('X-Caption-Skipped');
+    const pages   = res.headers.get('X-Pages-Fixed');
+    const reportId = res.headers.get('X-Report-Id');
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'caption-fixed-package.zip'; a.click();
+    URL.revokeObjectURL(url);
+    status.className = 'small w-100 text-success';
+    status.innerHTML = `✓ Filled captions on <strong>${filled}</strong> custom-image block(s) across ${pages} page(s)` +
+      (skipped > 0 ? `, ${skipped} skipped (see report)` : '') + `. ZIP downloaded.` +
+      (reportId ? ` — <a href="/api/link-checker/fix-report/${reportId}">download report CSV</a>` : '');
+    await lcScan();   // refresh — session now holds the caption-filled package
+  } catch (e) { status.className = 'small w-100 text-danger'; status.textContent = e.message; }
+  finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-card-text me-1"></i>Fill captions'; }
 }
 
 // ─── Migration QA report (dry-run preview) ────────────────────────────────────
@@ -2446,21 +2483,34 @@ function ppBuildPagesTable(pages) {
   const contentType = val('ppContentType') || 'page';
   const nodePattern = val('ppNodePattern') || PP_NODE_DEFAULTS[contentType];
 
+  const globalVal = val('ppPropValue');
   pages.forEach(page => {
-    const currentDisplay = (page.currentValue === null || page.currentValue === undefined)
-      ? '<span class="text-muted">—</span>'
-      : escHtml(page.currentValue);
+    const hasCurrent = !(page.currentValue === null || page.currentValue === undefined);
+    const currentDisplay = hasCurrent ? escHtml(page.currentValue) : '<span class="text-muted">— (not set)</span>';
+    // Prefill the New Value input: existing value (so wrong values can be edited) else the global value.
+    const prefill = hasCurrent ? page.currentValue : (globalVal || '');
     tbody.insertAdjacentHTML('beforeend', `
-      <tr data-path="${escHtml(page.path)}">
+      <tr data-path="${escHtml(page.path)}" data-current="${hasCurrent ? escHtml(page.currentValue) : ''}" data-hascurrent="${hasCurrent}" data-exists="${!!page.nodeExists}">
         <td><input type="checkbox" class="pp-page-chk" onchange="ppUpdateSelectionCount()" /></td>
         <td class="small font-monospace">${escHtml(page.path)}</td>
         <td class="small ${page.nodeExists ? 'text-success' : 'text-warning'}">${page.nodeExists ? escHtml(nodePattern) : 'missing'}</td>
         <td class="small">${currentDisplay}</td>
+        <td><input type="text" class="form-control form-control-sm pp-new-val" value="${escHtml(prefill)}" placeholder="new value" /></td>
         <td><span class="pp-status-cell text-muted">—</span></td>
       </tr>`);
   });
 
   ppUpdateSelectionCount();
+}
+
+// Set one value into every row's New Value box. Prefers the toolbar "Set all" field,
+// falling back to the top Property Value field.
+function ppFillAllNewValues() {
+  const v = (document.getElementById('ppBulkValue')?.value ?? '').trim() || val('ppPropValue');
+  const rows = document.querySelectorAll('#ppPagesBody tr .pp-new-val');
+  rows.forEach(i => { i.value = v; });
+  const status = document.getElementById('ppDrySummary');
+  if (status) status.innerHTML = `<span class="text-muted">Set New Value = <code>${escHtml(v)}</code> on all ${rows.length} row(s).</span>`;
 }
 
 function ppFilterPagesTable() {
@@ -2506,19 +2556,65 @@ function ppGetSelectedPaths() {
     .map(r => r.getAttribute('data-path'));
 }
 
+// Selected rows with their entered New Value + the discovered state.
+function ppGetSelectedUpdates() {
+  return [...document.querySelectorAll('#ppPagesBody tr')]
+    .filter(r => r.querySelector('.pp-page-chk')?.checked)
+    .map(r => ({
+      row:        r,
+      path:       r.getAttribute('data-path'),
+      value:      r.querySelector('.pp-new-val')?.value ?? '',
+      current:    r.getAttribute('data-current') || '',
+      hasCurrent: r.getAttribute('data-hascurrent') === 'true',
+      exists:     r.getAttribute('data-exists') === 'true',
+    }));
+}
+
+// Classify a selected row for the dry-run preview.
+function ppClassify(u) {
+  if (u.value === '')            return { key: 'skip',   label: 'no new value',              cls: 'bg-danger'    };
+  if (!u.exists)                 return { key: 'create', label: 'node missing — will create', cls: 'bg-info'      };
+  if (!u.hasCurrent)             return { key: 'new',    label: 'new property',               cls: 'bg-primary'   };
+  if (u.current === u.value)     return { key: 'same',   label: 'unchanged',                  cls: 'bg-secondary' };
+  return { key: 'change', label: 'will change', cls: 'bg-success' };
+}
+
+// Dry run — preview old → new on selected rows. Writes nothing to AEM.
+function ppDryRun() {
+  const propertyName = val('ppPropName');
+  if (!propertyName) return alert('Property name is required.');
+  const sel = ppGetSelectedUpdates();
+  if (!sel.length) return alert('Select at least one item.');
+  const counts = { change: 0, new: 0, create: 0, same: 0, skip: 0 };
+  sel.forEach(u => {
+    const c = ppClassify(u); counts[c.key]++;
+    const cell = u.row.querySelector('.pp-status-cell');
+    cell.className = 'pp-status-cell';
+    const arrow = c.key === 'change' ? ` <code class="text-muted">${escHtml(u.current)}</code> → <code>${escHtml(u.value)}</code>` : '';
+    cell.innerHTML = `<span class="badge ${c.cls}">${c.label}</span>${arrow}`;
+  });
+  document.getElementById('ppDrySummary').innerHTML =
+    `<i class="bi bi-eyeglasses me-1"></i><span class="text-muted">Dry run — nothing written.</span> ` +
+    `<strong class="text-success">${counts.change} will change</strong>, ${counts.new} new property, ` +
+    `${counts.create} node-create, ${counts.same} unchanged` +
+    (counts.skip ? `, <span class="text-danger">${counts.skip} have no new value</span>` : '') +
+    ` for <code>${escHtml(propertyName)}</code>.`;
+}
+
 async function ppRunUpdate() {
   const env = val('ppEnv');
   if (!env) return alert('Select a target environment.');
-  const selected = ppGetSelectedPaths();
-  if (!selected.length) return alert('Select at least one item.');
-
   const contentType = val('ppContentType') || 'page';
   const propertyName = val('ppPropName');
   if (!propertyName) return alert('Property name is required.');
-  const propertyValue = val('ppPropValue');
-  if (!propertyValue) return alert('Property value is required.');
 
-  if (!confirm(`Set "${propertyName}" = "${propertyValue}" on ${selected.length} item(s)?`)) return;
+  const sel = ppGetSelectedUpdates();
+  if (!sel.length) return alert('Select at least one item.');
+  const updates = sel.filter(u => u.value !== '').map(u => ({ path: u.path, value: u.value }));
+  if (!updates.length) return alert('Enter a New Value on the selected rows.');
+  const skipped = sel.length - updates.length;
+
+  if (!confirm(`Set "${propertyName}" on ${updates.length} item(s)${skipped ? ` (${skipped} skipped — no value)` : ''}?`)) return;
 
   document.getElementById('ppUpdateProgressSection').style.display = 'block';
   document.getElementById('ppRunBtn').disabled = true;
@@ -2539,12 +2635,11 @@ async function ppRunUpdate() {
   const res = await fetchJSON('/api/prop-updater/update/start', {
     method: 'POST',
     body: {
-      selectedPaths: selected,
+      updates,
       env,
       contentType,
       nodePattern:   val('ppNodePattern') || PP_NODE_DEFAULTS[contentType],
       propertyName,
-      propertyValue,
       valueType:     val('ppPropType') || 'String',
     }
   });
