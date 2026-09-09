@@ -2438,6 +2438,14 @@ function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which, customMap) {
   return { result: content, changes, unmatched };
 }
 
+// Escape any XML-invalid bare '&' so the fixed package installs cleanly in AEM (the Jackrabbit
+// DocView parser rejects a raw '&', e.g. a "?w=1&quality=80" query left unescaped in migrated
+// content). Only a '&' that does NOT start a valid entity (&name; / &#123; / &#xAB;) is escaped
+// to '&amp;'; proper entities (&amp; &lt; &gt; &quot; &nbsp; …) are left untouched.
+function sanitizeXmlEntities(s) {
+  return s.replace(/&(?![a-zA-Z][a-zA-Z0-9]*;|#\d+;|#x[0-9a-fA-F]+;)/g, '&amp;');
+}
+
 // Apply all QA fixes to every Franklin page in the ZIP (nested or flat).
 // Order: absolute → asset→DM → short-paths (so each step's output is safe for the next).
 async function buildQaFixedZip(buffer, opts) {
@@ -2472,7 +2480,7 @@ async function buildQaFixedZip(buffer, opts) {
           const pageLocale = qaLocaleRootOf(file, siteRoot);
           const x = (sel.has('crossLocale') && crossLocaleMappings?.length) ? qaFixCrossLocale(body, crossLocaleMappings, pageLocale) : { result: body, changes: [] }; body = x.result;
           body = unmaskProtected(body, protectedVals);   // restore cq:template/tags/MSM refs before writing back
-          const after = pre + body + post;
+          const after = sanitizeXmlEntities(pre + body + post);   // escape any stray bare '&' so AEM can install the package
           for (const ch of al.changes) changes.push({ file, type: 'alt-text', oldUrl: ch.value, newUrl: `${ch.altProp}="${ch.alt}"` });
           for (const ch of cp.changes) changes.push({ file, type: 'caption',  oldUrl: ch.value, newUrl: `caption="${ch.caption}"` });
           for (const ch of a.changes) changes.push({ file, type: 'absolute',     ...ch });
@@ -3039,7 +3047,7 @@ async function buildMetaFixedZip(buffer, fixerFn) {
           const file = name.replace(/^jcr_root/, '');
           const { before: pre, region, after: post, protectedVals } = franklinBlockRegion(before);
           const r = fixerFn(region);
-          const after = pre + unmaskProtected(r.result, protectedVals) + post;
+          const after = sanitizeXmlEntities(pre + unmaskProtected(r.result, protectedVals) + post);   // escape any stray bare '&' so AEM can install
           for (const ch of r.changes) changes.push({ file, ...ch });
           if (after !== before) pagesFixed++;
           jsz.file(name, after);
