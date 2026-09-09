@@ -1707,12 +1707,17 @@ async function lcFix(checks) {
     const changes = res.headers.get('X-Change-Count');
     const unmatched = res.headers.get('X-Unmatched');
     const reportId = res.headers.get('X-Report-Id');
+    const persisted = parseInt(res.headers.get('X-Custom-Persisted') || '0', 10);
+    const persistEnvs = res.headers.get('X-Persist-Envs') || '';
+    const recovered = parseInt(res.headers.get('X-Recovered') || '0', 10);
     const blob = await res.blob();
     const url  = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'qa-fixed-package.zip'; a.click();
     URL.revokeObjectURL(url);
     status.className = 'small mt-2 text-success';
-    status.textContent = `✓ Fixed ${changes} reference(s) across ${pages} page(s)${unmatched > 0 ? `, ${unmatched} unmatched (no CSV entry)` : ''}. ZIP downloaded.`;
+    status.textContent = `✓ Fixed ${changes} reference(s) across ${pages} page(s)${unmatched > 0 ? `, ${unmatched} unmatched (no CSV entry)` : ''}. ZIP downloaded.`
+      + (recovered > 0 ? ` Recovered ${recovered} asset(s) from AEM author — synced to all env asset-maps.` : '')
+      + (persisted > 0 ? ` Saved ${persisted} manual mapping(s) to the asset-map for: ${persistEnvs.replace(/,/g, ', ')} (per-env host).` : '');
     if (reportId) {
       document.getElementById('lcDownloadRow').style.display = '';
       document.getElementById('lcReportLink').href = '/api/link-checker/fix-report/' + reportId;

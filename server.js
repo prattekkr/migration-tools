@@ -1057,6 +1057,57 @@ function persistRecoveredRows(env, recoveredRows) {
   fs.writeFileSync(file, csv, 'utf8');
 }
 
+// Sync asset-map rows to EVERY configured environment's CSV. The asset UUID is identical
+// across environments (verified), so each env's DM Open API URL is rebuilt from that env's own
+// dmHost — path + uuid + filename stay the same. rows = [{path, uuid, damStatus?, isCF?,
+// scene7Name?, scene7File?, openApiUrl?}]. A row whose openApiUrl isn't an http(s) DM URL (e.g.
+// unapproved) is written verbatim (no host to swap). Returns { count, envs, paths }.
+function persistAssetRowsAllEnvs(rows) {
+  const envs = (loadSiteConfig().environments || []).filter(e => e.name && e.dmHost);
+  if (!envs.length || !rows || !rows.length) return { count: 0, envs: [], paths: [] };
+  const rowsByEnv = new Map(envs.map(e => [e.name, []]));
+  const paths = [];
+  for (const r of rows) {
+    if (!r.path || !r.uuid) continue;
+    const filename = path.posix.basename(r.path);
+    if (!filename) continue;
+    const isDm = /^https?:\/\//i.test(r.openApiUrl || '');
+    for (const e of envs) {
+      const host = e.dmHost.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      rowsByEnv.get(e.name).push({
+        path: r.path, uuid: r.uuid, scene7Name: r.scene7Name || '', scene7File: r.scene7File || '',
+        damStatus: r.damStatus || 'approved',
+        openApiUrl: isDm ? buildDmOpenApiUrl(host, r.uuid, filename) : (r.openApiUrl || r.path),
+        isCF: r.isCF || 'false',
+      });
+    }
+    paths.push(r.path);
+  }
+  const writtenEnvs = [];
+  for (const e of envs) {
+    const rr = rowsByEnv.get(e.name);
+    if (rr.length) { persistRecoveredRows(e.name, rr); writtenEnvs.push(e.name); }
+  }
+  return { count: paths.length, envs: writtenEnvs, paths };
+}
+
+// Author-supplied manual mappings → normalize to rows and sync to all env CSVs.
+// mappings = [{from, to}] (from = the /content/dam ref, to = the pasted DM URL).
+function persistCustomMappingsAllEnvs(mappings) {
+  if (!mappings || !mappings.length) return { count: 0, envs: [], paths: [] };
+  const damNorm = { correctRoot: '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
+  const rows = [];
+  for (const m of mappings) {
+    const uuidM = (m.to || '').match(/urn:aaid:aem:([0-9a-fA-F-]{36})/);
+    if (!uuidM) continue;                                     // need a DM URL with a UUID to map across envs
+    let damPath = damPathOf(m.from) || (String(m.from).startsWith('/content/dam/') ? m.from : null);
+    if (!damPath) continue;
+    damPath = normalizeDamPrefix(damPath.split('?')[0].split('#')[0], damNorm.correctRoot, damNorm.oldRoots);
+    rows.push({ path: damPath, uuid: uuidM[1].toLowerCase(), openApiUrl: m.to, damStatus: 'approved', isCF: 'false' });
+  }
+  return persistAssetRowsAllEnvs(rows);
+}
+
 // ── Update ZIP ────────────────────────────────────────────────────────────────
 app.post('/api/image/update-zip', (req, res, next) => {
   upload.single('zip')(req, res, err => {
@@ -2446,6 +2497,13 @@ function sanitizeXmlEntities(s) {
   return s.replace(/&(?![a-zA-Z][a-zA-Z0-9]*;|#\d+;|#x[0-9a-fA-F]+;)/g, '&amp;');
 }
 
+// Repair DM delivery URLs whose query carries `dpr=off` — Dynamic Media rejects it (HTTP 400),
+// it must be a numeric device-pixel-ratio (dpr=1). Scoped to /adobe/assets/ delivery URLs so we
+// never touch an unrelated value. Handles the param after a bare '&' or an escaped '&amp;'.
+function normalizeDeliveryUrls(s) {
+  return s.replace(/(\/adobe\/assets\/[^"'<>\s]*?)dpr=off\b/gi, '$1dpr=1');
+}
+
 // Apply all QA fixes to every Franklin page in the ZIP (nested or flat).
 // Order: absolute → asset→DM → short-paths (so each step's output is safe for the next).
 async function buildQaFixedZip(buffer, opts) {
@@ -2480,7 +2538,7 @@ async function buildQaFixedZip(buffer, opts) {
           const pageLocale = qaLocaleRootOf(file, siteRoot);
           const x = (sel.has('crossLocale') && crossLocaleMappings?.length) ? qaFixCrossLocale(body, crossLocaleMappings, pageLocale) : { result: body, changes: [] }; body = x.result;
           body = unmaskProtected(body, protectedVals);   // restore cq:template/tags/MSM refs before writing back
-          const after = sanitizeXmlEntities(pre + body + post);   // escape any stray bare '&' so AEM can install the package
+          const after = sanitizeXmlEntities(normalizeDeliveryUrls(pre + body + post));   // fix dpr=off→1, then escape any stray '&' so AEM can install
           for (const ch of al.changes) changes.push({ file, type: 'alt-text', oldUrl: ch.value, newUrl: `${ch.altProp}="${ch.alt}"` });
           for (const ch of cp.changes) changes.push({ file, type: 'caption',  oldUrl: ch.value, newUrl: `caption="${ch.caption}"` });
           for (const ch of a.changes) changes.push({ file, type: 'absolute',     ...ch });
@@ -2604,7 +2662,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
           username: appConfig?.target?.username, password: appConfig?.target?.password,
         }, msg => console.log('[link-checker fix]', msg));
         if (recovered.length) {
-          persistRecoveredRows(env, recovered);
+          persistAssetRowsAllEnvs(recovered);   // sync AEM-author-confirmed mappings to every env's CSV (per-env host)
           recoveredPaths = new Set(recovered.map(r => r.path));
         }
       }
@@ -2622,6 +2680,14 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
 
     const { buf, changes, unmatched, pagesFixed } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue, captionByValue });
     lcSessions.set(sessionId, buf);   // keep session, chained on the fixed result (enables per-category iteration + re-scan)
+
+    // Persist author-supplied asset mappings into every environment's asset-map CSV (per-env host),
+    // so the manual mapping is captured once and reused across dev/test/stage/prod.
+    let persisted = { count: 0, envs: [] };
+    if (customAssetMappings.length) {
+      try { persisted = persistCustomMappingsAllEnvs(customAssetMappings); }
+      catch (e) { console.warn('[link-checker fix] custom-mapping persist failed:', e.message); }
+    }
 
     const reportRows = changes.map(c => ({
       file: c.file, type: c.type,
@@ -2646,6 +2712,8 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
     res.setHeader('X-Recovered',    String(recoveredPaths.size));
     res.setHeader('X-Counts',       Buffer.from(JSON.stringify(counts)).toString('base64'));
     res.setHeader('X-Report-Id',    reportId);
+    res.setHeader('X-Custom-Persisted', String(persisted.count));
+    res.setHeader('X-Persist-Envs',     persisted.envs.join(','));
     res.send(buf);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3047,7 +3115,7 @@ async function buildMetaFixedZip(buffer, fixerFn) {
           const file = name.replace(/^jcr_root/, '');
           const { before: pre, region, after: post, protectedVals } = franklinBlockRegion(before);
           const r = fixerFn(region);
-          const after = sanitizeXmlEntities(pre + unmaskProtected(r.result, protectedVals) + post);   // escape any stray bare '&' so AEM can install
+          const after = sanitizeXmlEntities(normalizeDeliveryUrls(pre + unmaskProtected(r.result, protectedVals) + post));   // fix dpr=off→1 + escape stray '&' so AEM can install
           for (const ch of r.changes) changes.push({ file, ...ch });
           if (after !== before) pagesFixed++;
           jsz.file(name, after);
