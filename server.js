@@ -2507,7 +2507,7 @@ function normalizeDeliveryUrls(s) {
 // Apply all QA fixes to every Franklin page in the ZIP (nested or flat).
 // Order: absolute → asset→DM → short-paths (so each step's output is safe for the next).
 async function buildQaFixedZip(buffer, opts) {
-  const { siteRoot, internalHosts, pathMap, scene7Map, damNorm, crossLocaleMappings, altByValue, captionByValue } = opts;
+  const { siteRoot, internalHosts, pathMap, scene7Map, damNorm, crossLocaleMappings, altByValue, captionByValue, overwriteMeta } = opts;
   const sel        = opts.checks || new Set(['shortPath', 'absolute', 'pdf', 'dam', 'scene7']);
   const doAlt      = sel.has('alt') && altByValue && altByValue.size > 0;
   const doCaption  = sel.has('caption') && captionByValue && captionByValue.size > 0;
@@ -2530,8 +2530,8 @@ async function buildQaFixedZip(buffer, opts) {
           const file = name.replace(/^jcr_root/, '');
           const { before: pre, region, after: post, protectedVals } = franklinBlockRegion(before);
           let body = region;   // fix authored blocks + content fields; cq:template/tags/MSM refs stay masked
-          const al = doAlt ? qaFixAltText(body, altByValue) : { result: body, changes: [] };                                              body = al.result;   // alt first — matches original image values before asset conversion
-          const cp = doCaption ? qaFixCaption(body, captionByValue) : { result: body, changes: [] };                                       body = cp.result;   // caption also matches original image values
+          const al = doAlt ? qaFixAltText(body, altByValue, overwriteMeta) : { result: body, changes: [] };                                 body = al.result;   // alt first — matches original image values before asset conversion
+          const cp = doCaption ? qaFixCaption(body, captionByValue, overwriteMeta) : { result: body, changes: [] };                          body = cp.result;   // caption also matches original image values
           const a = sel.has('absolute') ? qaFixAbsolute(body, siteRoot, internalHosts, damNorm) : { result: body, changes: [] };            body = a.result;
           const b = doAsset             ? qaFixAssetRefs(body, pathMap, scene7Map, damNorm, assetWhich, customMap) : { result: body, changes: [], unmatched: [] }; body = b.result;
           const c = sel.has('shortPath') ? qaFixShortPaths(body, siteRoot) : { result: body, changes: [] };                                  body = c.result;
@@ -2607,7 +2607,7 @@ function collectUnresolvedDamPaths(buffer, pathMap, damNorm, which) {
 
 // ── Fix: apply the QA fixes and return the patched ZIP + change report ────────
 app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, res) => {
-  const { sessionId, siteRoot, env, internalDomains, checks } = req.body;
+  const { sessionId, siteRoot, env, internalDomains, checks, overwrite } = req.body;
   const buffer = lcSessions.get(sessionId);
   if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
   if (!siteRoot || !siteRoot.startsWith('/content/')) return res.status(400).json({ error: 'Enter a valid site root.' });
@@ -2674,11 +2674,11 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
     if ((sel.has('alt') || sel.has('caption')) && uuidToRow) {
       const host = se?.aemUrl || appConfig?.target?.host;
       const hostCfg = { host, username: appConfig?.target?.username, password: appConfig?.target?.password };
-      if (host && sel.has('alt'))     altByValue     = (await computeAltFills(buffer, uuidToRow, damNorm, hostCfg)).altByValue;
-      if (host && sel.has('caption')) captionByValue = (await computeCaptionFills(buffer, uuidToRow, damNorm, hostCfg)).captionByValue;
+      if (host && sel.has('alt'))     altByValue     = (await computeAltFills(buffer, uuidToRow, damNorm, hostCfg, !!overwrite)).altByValue;
+      if (host && sel.has('caption')) captionByValue = (await computeCaptionFills(buffer, uuidToRow, damNorm, hostCfg, !!overwrite)).captionByValue;
     }
 
-    const { buf, changes, unmatched, pagesFixed } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue, captionByValue });
+    const { buf, changes, unmatched, pagesFixed } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue, captionByValue, overwriteMeta: !!overwrite });
     lcSessions.set(sessionId, buf);   // keep session, chained on the fixed result (enables per-category iteration + re-scan)
 
     // Persist author-supplied asset mappings into every environment's asset-map CSV (per-env host),
@@ -3046,18 +3046,18 @@ async function fetchDamAltText(damPaths, cfg) {
 // using altByValue (image value -> alt text). Skips decorative images and props that
 // already have a non-empty alt (or a plain `alt`). Fills an existing empty <prop>Alt or
 // adds a fresh attribute.
-function qaFixAltText(xml, altByValue) {
+function qaFixAltText(xml, altByValue, overwrite) {
   const changes = [];
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
   const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const result = xml.replace(elRe, (full, node, attrStr, tail) => {
     const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
     while ((a = aRe.exec(attrStr))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
-    if (/^(presentation|none)$/i.test(attrs.role || '') || attrs.decorative === 'true') return full;
+    if (isDecorativeImage(attrs)) return full;                                // never add alt to a decorative image
     const genericAlt = (attrs.alt || '').trim();
     let out = attrStr, changed = false;
     for (const it of imageAltProps(attrs, raw)) {
-      if ((it.altValue || '').trim() || genericAlt) continue;                 // already labelled
+      if (!overwrite && ((it.altValue || '').trim() || genericAlt)) continue;  // already labelled (kept unless overwrite)
       const title = altByValue.get(it.value);
       if (!title) continue;
       const val = xmlAttrEscape(title);
@@ -3075,14 +3075,14 @@ function qaFixAltText(xml, altByValue) {
 
 // Fill `caption` on custom-image blocks (only) whose caption is empty/absent, using
 // captionByValue (image value -> caption text). Value chain is the same as alt.
-function qaFixCaption(xml, captionByValue) {
+function qaFixCaption(xml, captionByValue, overwrite) {
   const changes = [];
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
   const result = xml.replace(elRe, (full, node, attrStr, tail) => {
     const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
     while ((a = aRe.exec(attrStr))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
     if (!isCustomImageNode(attrs) || isDecorativeImage(attrs)) return full;
-    if ((attrs.caption || '').trim()) return full;                            // keep an existing caption
+    if (!overwrite && (attrs.caption || '').trim()) return full;              // keep an existing caption (unless overwrite)
     const item = imageAltProps(attrs, raw)[0];                               // the block's image ref
     const text = item && captionByValue.get(item.value);
     if (!text) return full;
@@ -3142,7 +3142,7 @@ async function buildMetaFixedZip(buffer, fixerFn) {
 // Shared alt-fill computation: scan the package for missing-alt component images,
 // resolve each to a /content/dam path, fetch metadata dc:title, and build
 // altByValue (image value -> alt text). Returns { altByValue, missingTotal, skips }.
-async function computeAltFills(buffer, uuidToRow, damNorm, hostCfg) {
+async function computeAltFills(buffer, uuidToRow, damNorm, hostCfg, overwrite) {
   const outer = new AdmZip(buffer);
   const innerE = outer.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
   const zip = innerE ? new AdmZip(innerE.getData()) : outer;
@@ -3150,18 +3150,27 @@ async function computeAltFills(buffer, uuidToRow, damNorm, hostCfg) {
   const valueToDam = new Map();
   const skips = new Map();
   const addSkip = (reason, asset) => { if (!skips.has(reason)) skips.set(reason, new Set()); skips.get(reason).add(asset); };
-  let missingTotal = 0;
+  const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)\s*\/?>/g;
+  let candidateTotal = 0;
   for (const entry of zip.getEntries()) {
     if (entry.isDirectory || !entry.entryName.endsWith('.xml') || lcIsSkipped(entry.entryName)) continue;
     let content; try { content = entry.getData().toString('utf8'); } catch { continue; }
     if (!isFranklinPage(content)) continue;
-    for (const f of qaAccessibility(franklinBlockRegion(content).region)) {
-      if (!/alt text/.test(f.issue)) continue;
-      missingTotal++;
-      if (/rich text/.test(f.node)) { addSkip('rich-text image — fix alt manually', f.asset || f.value); continue; }
-      const dam = altResolveDamPath(f.value, uuidToRow, damNorm);
-      if (!dam) { addSkip('not in asset-map (cannot locate /content/dam path)', f.asset || f.value); continue; }
-      valueToDam.set(f.value, dam);
+    const region = franklinBlockRegion(content).region;
+    let m;
+    while ((m = elRe.exec(region))) {
+      const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
+      while ((a = aRe.exec(m[2]))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
+      if (isDecorativeImage(attrs)) continue;
+      const genericAlt = (attrs.alt || '').trim();
+      for (const it of imageAltProps(attrs, raw)) {
+        const hasAlt = (it.altValue || '').trim() || genericAlt;
+        if (!overwrite && hasAlt) continue;                       // only images that need alt, unless overwriting
+        candidateTotal++;
+        const dam = altResolveDamPath(it.value, uuidToRow, damNorm);
+        if (!dam) { addSkip('not in asset-map (cannot locate /content/dam path)', it.value); continue; }
+        valueToDam.set(it.value, dam);
+      }
     }
   }
 
@@ -3172,14 +3181,14 @@ async function computeAltFills(buffer, uuidToRow, damNorm, hostCfg) {
     if (t) altByValue.set(value, t);
     else addSkip('asset not found on AEM author (no metadata)', dam);
   }
-  return { altByValue, missingTotal, skips };
+  return { altByValue, missingTotal: candidateTotal, skips };
 }
 
 // Caption-fill computation: scan the package for custom-image blocks with an empty caption,
 // resolve each block's image to a /content/dam path, fetch metadata, and build
 // captionByValue (image value -> caption text; same chain as alt). Returns
 // { captionByValue, candidateTotal, skips }.
-async function computeCaptionFills(buffer, uuidToRow, damNorm, hostCfg) {
+async function computeCaptionFills(buffer, uuidToRow, damNorm, hostCfg, overwrite) {
   const outer = new AdmZip(buffer);
   const innerE = outer.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
   const zip = innerE ? new AdmZip(innerE.getData()) : outer;
@@ -3199,7 +3208,7 @@ async function computeCaptionFills(buffer, uuidToRow, damNorm, hostCfg) {
       const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
       while ((a = aRe.exec(m[2]))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
       if (!isCustomImageNode(attrs) || isDecorativeImage(attrs)) continue;
-      if ((attrs.caption || '').trim()) continue;                 // already captioned
+      if (!overwrite && (attrs.caption || '').trim()) continue;    // already captioned (unless overwriting)
       const item = imageAltProps(attrs, raw)[0];
       if (!item) continue;
       candidateTotal++;
@@ -3223,7 +3232,7 @@ async function computeCaptionFills(buffer, uuidToRow, damNorm, hostCfg) {
 // Flow: find missing-alt component images → resolve DM URL / dam path via CSV → GET the
 // asset's metadata.json on the env's AEM author → use dc:title as alt → patched ZIP + report.
 app.post('/api/link-checker/fix-alt', express.json({ limit: '1mb' }), async (req, res) => {
-  const { sessionId, siteRoot, env } = req.body;
+  const { sessionId, siteRoot, env, overwrite } = req.body;
   const buffer = lcSessions.get(sessionId);
   if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
   if (!siteRoot || !siteRoot.startsWith('/content/')) return res.status(400).json({ error: 'Enter a valid site root.' });
@@ -3238,9 +3247,9 @@ app.post('/api/link-checker/fix-alt', express.json({ limit: '1mb' }), async (req
     if (!host) return res.status(400).json({ error: `Environment "${env}" has no AEM host to read metadata from.` });
 
     const { altByValue, missingTotal, skips } = await computeAltFills(buffer, uuidToRow, damNorm,
-      { host, username: appConfig?.target?.username, password: appConfig?.target?.password });
+      { host, username: appConfig?.target?.username, password: appConfig?.target?.password }, !!overwrite);
 
-    const { buf, changes, pagesFixed } = await buildMetaFixedZip(buffer, region => qaFixAltText(region, altByValue));
+    const { buf, changes, pagesFixed } = await buildMetaFixedZip(buffer, region => qaFixAltText(region, altByValue, !!overwrite));
 
     // Change report CSV.
     const reportRows = changes.map(c => ({ file: c.file, node: c.node, altProp: c.altProp, image: c.value, alt: c.alt, status: 'alt filled' }));
@@ -3271,7 +3280,7 @@ app.post('/api/link-checker/fix-alt', express.json({ limit: '1mb' }), async (req
 // POST /api/link-checker/fix-caption — fill the `caption` on custom-image blocks (only)
 // whose caption is empty, using the same DAM-metadata chain as alt (description→title→filename).
 app.post('/api/link-checker/fix-caption', express.json({ limit: '1mb' }), async (req, res) => {
-  const { sessionId, siteRoot, env } = req.body;
+  const { sessionId, siteRoot, env, overwrite } = req.body;
   const buffer = lcSessions.get(sessionId);
   if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
   if (!siteRoot || !siteRoot.startsWith('/content/')) return res.status(400).json({ error: 'Enter a valid site root.' });
@@ -3286,9 +3295,9 @@ app.post('/api/link-checker/fix-caption', express.json({ limit: '1mb' }), async 
     if (!host) return res.status(400).json({ error: `Environment "${env}" has no AEM host to read metadata from.` });
 
     const { captionByValue, candidateTotal, skips } = await computeCaptionFills(buffer, uuidToRow, damNorm,
-      { host, username: appConfig?.target?.username, password: appConfig?.target?.password });
+      { host, username: appConfig?.target?.username, password: appConfig?.target?.password }, !!overwrite);
 
-    const { buf, changes, pagesFixed } = await buildMetaFixedZip(buffer, region => qaFixCaption(region, captionByValue));
+    const { buf, changes, pagesFixed } = await buildMetaFixedZip(buffer, region => qaFixCaption(region, captionByValue, !!overwrite));
 
     const reportRows = changes.map(c => ({ file: c.file, node: c.node, image: c.value, caption: c.caption, status: 'caption filled' }));
     for (const [reason, set] of skips) for (const asset of set) reportRows.push({ file: '', node: '', image: asset, caption: '', status: reason });

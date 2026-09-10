@@ -1666,6 +1666,9 @@ function lcCrossLocaleMappings() {
   return [...groups, ...custom].filter(m => m.from && m.to);
 }
 
+// Whether to overwrite alt/captions already authored in the ZIP (else only empty ones are filled).
+function lcOverwriteMeta() { return document.getElementById('lcOverwriteMeta')?.checked || false; }
+
 // internalDomains = the domains NOT ticked as external
 function lcInternalDomains() {
   return [...document.querySelectorAll('#lcDomains input[type=checkbox]')]
@@ -1696,7 +1699,7 @@ async function lcFix(checks) {
     let sel = checks;
     if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'crossLocale']
                                     : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption'];
-    const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel };
+    const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel, overwrite: lcOverwriteMeta() };
     if (sel.includes('crossLocale')) body.crossLocaleMappings = mappings;
     if (sel.some(c => c === 'pdf' || c === 'dam' || c === 'scene7')) body.customAssetMappings = lcCustomAssetMappings();
     const res = await fetch('/api/link-checker/fix', {
@@ -1741,7 +1744,7 @@ async function lcFixAlt() {
   try {
     const res = await fetch('/api/link-checker/fix-alt', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env }),
+      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env, overwrite: lcOverwriteMeta() }),
     });
     if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Alt-text fix failed'); }
     const filled  = res.headers.get('X-Alt-Filled');
@@ -1775,7 +1778,7 @@ async function lcFixCaption() {
   try {
     const res = await fetch('/api/link-checker/fix-caption', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env }),
+      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env, overwrite: lcOverwriteMeta() }),
     });
     if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Caption fill failed'); }
     const filled  = res.headers.get('X-Caption-Filled');

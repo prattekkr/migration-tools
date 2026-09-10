@@ -900,8 +900,12 @@
           <i class="bi bi-universal-access text-info"></i><strong>Accessibility</strong>
           <span class="badge bg-info ms-1" id="lcA11yCount">0</span>
           <span class="text-muted small ms-1">— missing/empty image alt text, lost captions, unlabeled controls, and vague link text, with the affected component, asset and pages. Advisory — fix these in the authored content.</span>
-          <button class="btn btn-sm btn-outline-success ms-auto" id="lcFillAltBtn" onclick="lcFixAlt()" title="Fetch each image's alt from its DAM metadata (dc:description → dc:title → filename) and write it as alt text"><i class="bi bi-magic me-1"></i>Fill alt text</button>
-          <button class="btn btn-sm btn-outline-success" id="lcFillCaptionBtn" onclick="lcFixCaption()" title="Fill the caption on custom-image blocks (only empty ones) from DAM metadata — same rule as alt text"><i class="bi bi-card-text me-1"></i>Fill captions</button>
+          <div class="form-check form-check-inline ms-auto mb-0" title="If ticked, alt/caption already authored in the ZIP are replaced too; if unticked, only empty ones are filled">
+            <input class="form-check-input" type="checkbox" id="lcOverwriteMeta" />
+            <label class="form-check-label small" for="lcOverwriteMeta">Overwrite existing</label>
+          </div>
+          <button class="btn btn-sm btn-outline-success" id="lcFillAltBtn" onclick="lcFixAlt()" title="Fetch each image's alt from its DAM metadata (dc:description → dc:title → filename) and write it as alt text"><i class="bi bi-magic me-1"></i>Fill alt text</button>
+          <button class="btn btn-sm btn-outline-success" id="lcFillCaptionBtn" onclick="lcFixCaption()" title="Fill the caption on custom-image blocks from DAM metadata — same rule as alt text"><i class="bi bi-card-text me-1"></i>Fill captions</button>
           <button type="button" class="btn btn-sm btn-link text-muted p-0 ms-1" title="Collapse / expand" onclick="lcToggleCard(this)"><i class="bi bi-chevron-up"></i></button>
           <div id="lcAltStatus" class="small w-100 mt-1"></div>
           <div id="lcCaptionStatus" class="small w-100"></div>
