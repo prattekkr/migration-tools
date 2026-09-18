@@ -1412,6 +1412,7 @@ function lcRenderReport(data) {
 
   lcResetBroken();
   lcRenderAccessibility(data);
+  lcRenderStyles(data);
   lcRenderCrossLocale();
   lcRenderAbsolute();
   lcRenderUnresolvedAssets(data);
@@ -1499,6 +1500,38 @@ function lcRenderBroken(data) {
 
   document.getElementById('lcBrokenBody').innerHTML =
     aemNote + summary + `<div style="max-height:340px;overflow:auto">${rows}</div>`;
+}
+
+// Re-fetch the block style picklists from the selected env's AEM author → update the vocabulary.
+async function lcRefreshStyleVocab() {
+  const env = document.getElementById('lcEnv').value;
+  const siteRoot = document.getElementById('lcSiteRoot').value.trim();
+  if (!env) { alert('Select a target environment first (to reach its AEM author).'); return; }
+  const btn = document.getElementById('lcRefreshStylesBtn'); const old = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing…';
+  const status = document.getElementById('lcStatus');
+  try {
+    const res = await fetch('/api/link-checker/refresh-style-vocab', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ env, siteRoot }),
+    });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'Refresh failed');
+    status.className = 'text-success small w-100 mt-1';
+    status.textContent = `✓ Style vocabulary refreshed from ${d.source}: ${d.blocks} block(s), ${d.classes} classes.`;
+    if (lcAnalysis) await lcScan();   // re-scan so Unsupported styles reflects the fresh vocabulary
+  } catch (e) { status.className = 'text-danger small w-100 mt-1'; status.textContent = e.message; }
+  finally { btn.disabled = false; btn.innerHTML = old; }
+}
+
+// Unsupported dynamic-picklist style classes (fixable — moved to *_commonCustomClass).
+function lcRenderStyles(data) {
+  const card = document.getElementById('lcStylesCard');
+  const s = data.unsupportedStyles || { count: 0, examples: [] };
+  if (!s.count) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  document.getElementById('lcStylesCount').textContent = s.count;
+  document.getElementById('lcStylesBody').innerHTML = lcExamples(s.examples) ||
+    '<div class="text-muted small">—</div>';
 }
 
 // Static accessibility findings (advisory — not auto-fixed).
@@ -1697,8 +1730,8 @@ async function lcFix(checks) {
     // checks === null → "Fix all": the 5 checks + image alt text + custom-image captions, PLUS cross-locale when ready.
     const mappings = lcCrossLocaleMappings();
     let sel = checks;
-    if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'crossLocale']
-                                    : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption'];
+    if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'styles', 'crossLocale']
+                                    : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'styles'];
     const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel, overwrite: lcOverwriteMeta() };
     if (sel.includes('crossLocale')) body.crossLocaleMappings = mappings;
     if (sel.some(c => c === 'pdf' || c === 'dam' || c === 'scene7')) body.customAssetMappings = lcCustomAssetMappings();

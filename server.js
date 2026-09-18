@@ -2230,6 +2230,8 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
     }
     const unresolvedAssets = new Map();   // ref -> { current, check, verdict, count }
     const a11yAgg = new Map();            // issue|node -> { node, issue, prop, count, files:Set, samples:[] }
+    const styleVocab = loadStyleVocab();
+    const stylesAgg = mk();               // unsupported dynamic-picklist style classes
 
     const addEx = (c, file, url) => { c.count++; c.files.add(file); c.examples.push({ file, url }); };   // return all (client lists/filters them)
 
@@ -2281,6 +2283,9 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
         if (a.samples.length < 10 && !a.samples.some(s => s.page === file && s.value === f.value))
           a.samples.push({ page: file, asset: f.asset, prop: f.prop, value: f.value });
       }
+
+      for (const s of scanUnsupportedStyles(region, styleVocab))
+        addEx(stylesAgg, file, `${s.node} [${s.block}] ${s.prop}: ${s.unsupported.join(', ')}`);
     }
 
     const a11yOrder = { 'missing alt text': 0, 'empty alt text': 1, 'control has no accessible label': 2, 'missing caption': 3, 'empty caption': 4, 'vague link text': 5 };
@@ -2319,6 +2324,7 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
       crossLocale: { count: crossCount, files: crossFilesSet.size, groups: crossGroupsArr, unresolved: pack(crossUnresolved) },
       unresolvedAssets: [...unresolvedAssets.values()].sort((a, b) => b.count - a.count),
       accessibility,
+      unsupportedStyles: pack(stylesAgg),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2489,6 +2495,87 @@ function qaFixAssetRefs(xml, pathMap, scene7Map, damNorm, which, customMap) {
   return { result: content, changes, unmatched };
 }
 
+// ── Unsupported styles (dynamic-picklist class validation) ─────────────────────
+// EDS blocks store style classes in two families: layout containers use style_* ,
+// component blocks use classes_* . Within each, *_customDynamicClass is the Style-tab
+// dropdown (must be one of the block's picklist vocabulary) and *_commonCustomClass is the
+// free-form author field. The migration sometimes writes a non-vocabulary class into the
+// *_customDynamicClass property, which the UI can't represent and which breaks rendering.
+let _styleVocab = null;
+function loadStyleVocab() {
+  if (_styleVocab) return _styleVocab;
+  try {
+    const p = path.join(DATA_DIR, 'style-classes.json');
+    _styleVocab = fs.existsSync(p) ? (JSON.parse(fs.readFileSync(p, 'utf8')).blocks || {}) : {};
+  } catch { _styleVocab = {}; }
+  return _styleVocab;
+}
+
+// Map a block node's aueComponentId/model to its picklist-config key (e.g. custom-image→image,
+// custom-title→title, text-container→text; exact match wins so grid-container stays grid-container).
+function styleConfigKey(attrs, vocab) {
+  const id = (attrs.auecomponentid || attrs.model || '').trim();
+  if (!id) return null;
+  for (const c of [id, id.replace(/^custom-/, ''), id.replace(/-container$/, '')]) if (vocab[c]) return c;
+  return null;
+}
+
+// Scan a Franklin region for *_customDynamicClass values not in the block's picklist vocabulary.
+// Returns [{ node, block, prop, unsupported:[...], value }].
+function scanUnsupportedStyles(xml, vocab) {
+  const out = [];
+  const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)\s*\/?>/g;
+  let m;
+  while ((m = elRe.exec(xml))) {
+    const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
+    while ((a = aRe.exec(m[2]))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
+    const key = styleConfigKey(attrs, vocab); if (!key) continue;
+    const allowed = new Set(vocab[key]);
+    for (const ln in attrs) {
+      if (!/_customdynamicclass$/.test(ln)) continue;
+      const bad = attrs[ln].split(',').map(t => t.trim()).filter(Boolean).filter(t => !allowed.has(t));
+      if (bad.length) out.push({ node: m[1], block: key, prop: raw[ln], unsupported: bad, value: attrs[ln] });
+    }
+  }
+  return out;
+}
+
+// Fix: move unsupported dynamic classes into the sibling free-form *_commonCustomClass property
+// (comma-appended, deduped), leaving only vocabulary classes in *_customDynamicClass.
+function qaFixUnsupportedStyles(xml, vocab) {
+  const changes = [];
+  const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
+  const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const result = xml.replace(elRe, (full, node, attrStr, tail) => {
+    const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
+    while ((a = aRe.exec(attrStr))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
+    const key = styleConfigKey(attrs, vocab); if (!key) return full;
+    const allowed = new Set(vocab[key]);
+    let out = attrStr, changed = false;
+    for (const ln of Object.keys(attrs)) {
+      if (!/_customdynamicclass$/.test(ln)) continue;
+      const dynName = raw[ln];
+      const tokens = attrs[ln].split(',').map(t => t.trim()).filter(Boolean);
+      const unsupported = tokens.filter(t => !allowed.has(t));
+      if (!unsupported.length) continue;
+      const supported  = tokens.filter(t => allowed.has(t));
+      const commonName = dynName.replace(/customDynamicClass$/i, 'commonCustomClass');
+      const existing   = (attrs[commonName.toLowerCase()] || '').split(',').map(t => t.trim()).filter(Boolean);
+      const merged     = [...new Set([...existing, ...unsupported])];
+      out = out.replace(new RegExp('(\\s' + escRe(dynName) + '=")[^"]*(")'), `$1${xmlAttrEscape(supported.join(','))}$2`);   // keep only vocabulary classes
+      const mergedVal = xmlAttrEscape(merged.join(','));
+      if (attrs[commonName.toLowerCase()] !== undefined)
+        out = out.replace(new RegExp('(\\s' + escRe(commonName) + '=")[^"]*(")'), `$1${mergedVal}$2`);                       // append to existing free-form
+      else
+        out += ` ${commonName}="${mergedVal}"`;                                                                             // or add the free-form property
+      changes.push({ node, block: key, prop: dynName, moved: unsupported, to: commonName });
+      changed = true;
+    }
+    return changed ? `<${node}${out}${tail}>` : full;
+  });
+  return { result, changes };
+}
+
 // Escape any XML-invalid bare '&' so the fixed package installs cleanly in AEM (the Jackrabbit
 // DocView parser rejects a raw '&', e.g. a "?w=1&quality=80" query left unescaped in migrated
 // content). Only a '&' that does NOT start a valid entity (&name; / &#123; / &#xAB;) is escaped
@@ -2513,6 +2600,8 @@ async function buildQaFixedZip(buffer, opts) {
   const doCaption  = sel.has('caption') && captionByValue && captionByValue.size > 0;
   const assetWhich = { pdf: sel.has('pdf'), dam: sel.has('dam'), scene7: sel.has('scene7') };
   const doAsset    = assetWhich.pdf || assetWhich.dam || assetWhich.scene7;
+  const doStyles   = sel.has('styles');
+  const styleVocab = doStyles ? loadStyleVocab() : {};
   const customMap  = new Map((opts.customAssetMappings || []).filter(m => m && m.from && m.to).map(m => [m.from, m.to]));
   const outerAdm   = new AdmZip(buffer);
   const innerEntry = outerAdm.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
@@ -2537,11 +2626,13 @@ async function buildQaFixedZip(buffer, opts) {
           const c = sel.has('shortPath') ? qaFixShortPaths(body, siteRoot) : { result: body, changes: [] };                                  body = c.result;
           const pageLocale = qaLocaleRootOf(file, siteRoot);
           const x = (sel.has('crossLocale') && crossLocaleMappings?.length) ? qaFixCrossLocale(body, crossLocaleMappings, pageLocale) : { result: body, changes: [] }; body = x.result;
+          const st = doStyles ? qaFixUnsupportedStyles(body, styleVocab) : { result: body, changes: [] };                     body = st.result;
           body = unmaskProtected(body, protectedVals);   // restore cq:template/tags/MSM refs before writing back
           const after = sanitizeXmlEntities(normalizeDeliveryUrls(pre + body + post));   // fix dpr=off→1, then escape any stray '&' so AEM can install
           for (const ch of al.changes) changes.push({ file, type: 'alt-text', oldUrl: ch.value, newUrl: `${ch.altProp}="${ch.alt}"` });
           for (const ch of cp.changes) changes.push({ file, type: 'caption',  oldUrl: ch.value, newUrl: `caption="${ch.caption}"` });
           for (const ch of a.changes) changes.push({ file, type: 'absolute',     ...ch });
+          for (const ch of st.changes) changes.push({ file, type: 'unsupported-style', oldUrl: `${ch.prop}: ${ch.moved.join(',')}`, newUrl: `moved to ${ch.to}` });
           for (const ch of b.changes) changes.push({ file, type: 'asset-dm',     ...ch });
           for (const ch of c.changes) changes.push({ file, type: 'short-path',   ...ch });
           for (const ch of x.changes) changes.push({ file, type: 'cross-locale', ...ch });
@@ -3227,6 +3318,51 @@ async function computeCaptionFills(buffer, uuidToRow, damNorm, hostCfg, overwrit
   }
   return { captionByValue, candidateTotal, skips };
 }
+
+// POST /api/link-checker/refresh-style-vocab — re-fetch the per-block picklist spreadsheets from
+// the selected env's AEM author and rewrite data/style-classes.json (the vocabulary the
+// Unsupported Styles check validates against).
+app.post('/api/link-checker/refresh-style-vocab', express.json({ limit: '1mb' }), async (req, res) => {
+  const { env, siteRoot } = req.body;
+  const se = env ? loadSiteConfig().environments.find(e => e.name === env) : null;
+  const host = (se?.aemUrl || appConfig?.target?.host || '').replace(/\/$/, '');
+  if (!host) return res.status(400).json({ error: 'Select a target environment with an AEM author host.' });
+
+  // The picklist config lives at the corporate root (…/abbvie-com/config), not the locale root.
+  let base = '/content/abbvie-nextgen-eds/corporate/abbvie-com';
+  const m = (siteRoot || '').match(/^(.*?\/abbvie-com)(?:\/|$)/);
+  if (m) base = m[1];
+  const cfgPath = base + '/config';
+  const opts = { httpsAgent, timeout: 15000, validateStatus: () => true,
+    auth: { username: appConfig?.target?.username || '', password: appConfig?.target?.password || '' } };
+
+  try {
+    const listRes = await axios.get(host + cfgPath + '.1.json', opts);
+    if (listRes.status !== 200 || !listRes.data || typeof listRes.data !== 'object')
+      return res.status(502).json({ error: `Could not read ${cfgPath} on ${host} (HTTP ${listRes.status}).` });
+    const nodes = Object.keys(listRes.data).filter(k => /-picklist-config$/.test(k));
+    if (!nodes.length) return res.status(404).json({ error: `No *-picklist-config nodes found under ${cfgPath}.` });
+
+    const blocks = {};
+    for (const node of nodes) {
+      const r = await axios.get(host + cfgPath + '/' + encodeURIComponent(node) + '.infinity.json', opts);
+      if (r.status !== 200 || !r.data) continue;
+      const cc = r.data['jcr:content'] || {};
+      blocks[node.replace(/-picklist-config$/, '')] = [...new Set(
+        Object.values(cc).filter(v => v && typeof v === 'object' && v['Style Class'])
+          .map(v => String(v['Style Class']).trim()).filter(Boolean))].sort();
+    }
+    const doc = {
+      _comment: 'Allowed dynamic-picklist Style Class values per EDS block, from <config>/*-picklist-config spreadsheets. Used by the Link Checker Unsupported Styles check. Regenerate via the Refresh button when picklists change.',
+      generatedAt: new Date().toISOString(), source: cfgPath, blocks,
+    };
+    fs.writeFileSync(path.join(DATA_DIR, 'style-classes.json'), JSON.stringify(doc, null, 2), 'utf8');
+    _styleVocab = blocks;   // refresh the in-memory cache
+    res.json({ ok: true, blocks: Object.keys(blocks).length, classes: Object.values(blocks).reduce((s, a) => s + a.length, 0), source: cfgPath });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // POST /api/link-checker/fix-alt — fill missing image alt text from DAM metadata dc:title.
 // Flow: find missing-alt component images → resolve DM URL / dam path via CSV → GET the
