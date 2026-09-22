@@ -2111,14 +2111,14 @@ function franklinBlockRegion(xml) {
   const start = open.index + open[0].length;
   if (close < start) return { before: '', region: xml, after: '', protectedVals: [] };
   const protectedVals = [];
-  const maskedOpenTag = open[0].replace(PROTECTED_JCR_CONTENT_ATTR_RE, (m, pre, val) => {
+  const region = (open[0] + xml.slice(start, close)).replace(PROTECTED_JCR_CONTENT_ATTR_RE, (m, pre, val) => {   // mask across start tag + child nodes (protects cq:master on cq:LiveSyncConfig)
     const token = ` P${protectedVals.length} `;
     protectedVals.push(val);
     return pre + token;
   });
   return {
     before: xml.slice(0, open.index),
-    region: maskedOpenTag + xml.slice(start, close),
+    region,
     after: xml.slice(close),
     protectedVals,
   };
