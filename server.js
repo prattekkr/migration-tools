@@ -2232,6 +2232,8 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
     const a11yAgg = new Map();            // issue|node -> { node, issue, prop, count, files:Set, samples:[] }
     const styleVocab = loadStyleVocab();
     const stylesAgg = mk();               // unsupported dynamic-picklist style classes
+    const robotsMap = loadRobotsMap();
+    const robotsAgg = mk();               // pages missing a cq:robotsTags the CSV says they should have
 
     const addEx = (c, file, url) => { c.count++; c.files.add(file); c.examples.push({ file, url }); };   // return all (client lists/filters them)
 
@@ -2286,6 +2288,13 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
 
       for (const s of scanUnsupportedStyles(region, styleVocab))
         addEx(stylesAgg, file, `${s.node} [${s.block}] ${s.prop}: ${s.unsupported.join(', ')}`);
+
+      const rtags = robotsMap.get(robotsPagePath(file));
+      if (rtags) {
+        const openTag = (content.match(/<jcr:content(?:"[^"]*"|'[^']*'|[^>"'])*>/) || [''])[0];
+        if (!/\bcq:robotsTags\s*=/.test(openTag))
+          addEx(robotsAgg, file, `${robotsPagePath(file)} → cq:robotsTags="[${rtags.join(', ')}]"`);
+      }
     }
 
     const a11yOrder = { 'missing alt text': 0, 'empty alt text': 1, 'control has no accessible label': 2, 'missing caption': 3, 'empty caption': 4, 'vague link text': 5 };
@@ -2325,6 +2334,7 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
       unresolvedAssets: [...unresolvedAssets.values()].sort((a, b) => b.count - a.count),
       accessibility,
       unsupportedStyles: pack(stylesAgg),
+      missingRobots: pack(robotsAgg),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2576,6 +2586,49 @@ function qaFixUnsupportedStyles(xml, vocab) {
   return { result, changes };
 }
 
+// ── Missing robots tags ────────────────────────────────────────────────────────
+// robotsTags.csv (repo root) maps EDS page paths → the cq:robotsTags value that page should
+// carry. Keyed by BOTH the live-copy path (edsPagePath) and the blueprint path
+// (lang masters path), so a package page matches whichever it is. Value is a JCR String[].
+let _robotsMap = null;
+function loadRobotsMap() {
+  if (_robotsMap) return _robotsMap;
+  const m = new Map();
+  try {
+    const p = path.join(__dirname, 'robotsTags.csv');
+    if (fs.existsSync(p)) {
+      const rows = parse(fs.readFileSync(p, 'utf8'), { columns: true, skip_empty_lines: true, bom: true, relax_column_count: true });
+      for (const r of rows) {
+        const tags = (r['cq:robotsTags'] || '').split(/[|,]/).map(t => t.trim()).filter(Boolean);
+        if (!tags.length) continue;
+        for (const key of [r['edsPagePath'], r['lang masters path']]) {
+          const k = (key || '').trim().replace(/\/$/, '');
+          if (k.startsWith('/content/')) m.set(k, tags);
+        }
+      }
+    }
+  } catch { /* leave empty on error */ }
+  _robotsMap = m;
+  return m;
+}
+
+// Page path of a Franklin .content.xml entry (…/<page>/.content.xml → …/<page>).
+const robotsPagePath = file => (file || '').replace(/\/\.content\.xml$/i, '');
+
+// Set cq:robotsTags (String[]) on the page's jcr:content node when the CSV has a value for this
+// page and the property is missing. Adds only cq:robotsTags (no inheritance changes).
+function qaFixRobotsTags(xml, pagePath, robotsMap) {
+  const tags = robotsMap && robotsMap.get(pagePath);
+  if (!tags) return { result: xml, changes: [] };
+  const openM = xml.match(/<jcr:content(?:"[^"]*"|'[^']*'|[^>"'])*>/);
+  if (!openM) return { result: xml, changes: [] };
+  const tag = openM[0];
+  if (/\bcq:robotsTags\s*=/.test(tag)) return { result: xml, changes: [] };   // already set → not "missing"
+  const cm = tag.match(/(\s*\/?)>$/);
+  const newTag = tag.slice(0, tag.length - cm[0].length) + ` cq:robotsTags="[${tags.join(',')}]"` + cm[0];
+  return { result: xml.replace(tag, newTag), changes: [{ pagePath, value: tags.join(',') }] };
+}
+
 // Escape any XML-invalid bare '&' so the fixed package installs cleanly in AEM (the Jackrabbit
 // DocView parser rejects a raw '&', e.g. a "?w=1&quality=80" query left unescaped in migrated
 // content). Only a '&' that does NOT start a valid entity (&name; / &#123; / &#xAB;) is escaped
@@ -2602,6 +2655,8 @@ async function buildQaFixedZip(buffer, opts) {
   const doAsset    = assetWhich.pdf || assetWhich.dam || assetWhich.scene7;
   const doStyles   = sel.has('styles');
   const styleVocab = doStyles ? loadStyleVocab() : {};
+  const doRobots   = sel.has('robots');
+  const robotsMap  = doRobots ? loadRobotsMap() : null;
   const customMap  = new Map((opts.customAssetMappings || []).filter(m => m && m.from && m.to).map(m => [m.from, m.to]));
   const outerAdm   = new AdmZip(buffer);
   const innerEntry = outerAdm.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
@@ -2628,11 +2683,13 @@ async function buildQaFixedZip(buffer, opts) {
           const x = (sel.has('crossLocale') && crossLocaleMappings?.length) ? qaFixCrossLocale(body, crossLocaleMappings, pageLocale) : { result: body, changes: [] }; body = x.result;
           const st = doStyles ? qaFixUnsupportedStyles(body, styleVocab) : { result: body, changes: [] };                     body = st.result;
           body = unmaskProtected(body, protectedVals);   // restore cq:template/tags/MSM refs before writing back
-          const after = sanitizeXmlEntities(normalizeDeliveryUrls(pre + body + post));   // fix dpr=off→1, then escape any stray '&' so AEM can install
+          const rob = doRobots ? qaFixRobotsTags(pre + body + post, robotsPagePath(file), robotsMap) : { result: pre + body + post, changes: [] };
+          const after = sanitizeXmlEntities(normalizeDeliveryUrls(rob.result));   // fix dpr=off→1, then escape any stray '&' so AEM can install
           for (const ch of al.changes) changes.push({ file, type: 'alt-text', oldUrl: ch.value, newUrl: `${ch.altProp}="${ch.alt}"` });
           for (const ch of cp.changes) changes.push({ file, type: 'caption',  oldUrl: ch.value, newUrl: `caption="${ch.caption}"` });
           for (const ch of a.changes) changes.push({ file, type: 'absolute',     ...ch });
           for (const ch of st.changes) changes.push({ file, type: 'unsupported-style', oldUrl: `${ch.prop}: ${ch.moved.join(',')}`, newUrl: `moved to ${ch.to}` });
+          for (const ch of rob.changes) changes.push({ file, type: 'robots-tags', oldUrl: '(missing)', newUrl: `cq:robotsTags="[${ch.value}]"` });
           for (const ch of b.changes) changes.push({ file, type: 'asset-dm',     ...ch });
           for (const ch of c.changes) changes.push({ file, type: 'short-path',   ...ch });
           for (const ch of x.changes) changes.push({ file, type: 'cross-locale', ...ch });

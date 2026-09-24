@@ -928,6 +928,18 @@
         <div class="card-body lc-collapse" id="lcStylesBody"></div>
       </div>
 
+      <!-- missing robots tags (from robotsTags.csv) -->
+      <div class="card mb-3" id="lcRobotsCard" style="display:none;border-left:4px solid #dc3545">
+        <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+          <i class="bi bi-robot text-danger"></i><strong>Missing robots tags</strong>
+          <span class="badge bg-danger ms-1" id="lcRobotsCount">0</span>
+          <span class="text-muted small ms-1">— pages that should carry a <code>cq:robotsTags</code> value (per robotsTags.csv) but don't. Fix sets it on <code>jcr:content</code>.</span>
+          <button class="btn btn-sm btn-outline-success ms-auto" id="lcRobotsFixBtn" onclick="lcFix(['robots'])"><i class="bi bi-magic me-1"></i>Fix</button>
+          <button type="button" class="btn btn-sm btn-link text-muted p-0 ms-1" title="Collapse / expand" onclick="lcToggleCard(this)"><i class="bi bi-chevron-up"></i></button>
+        </div>
+        <div class="card-body lc-collapse" id="lcRobotsBody"></div>
+      </div>
+
       <!-- cross-locale review -->
       <div class="card mb-3" id="lcCrossCard" style="display:none">
         <div class="card-header d-flex align-items-center gap-2">

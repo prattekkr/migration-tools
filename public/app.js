@@ -1413,6 +1413,7 @@ function lcRenderReport(data) {
   lcResetBroken();
   lcRenderAccessibility(data);
   lcRenderStyles(data);
+  lcRenderRobots(data);
   lcRenderCrossLocale();
   lcRenderAbsolute();
   lcRenderUnresolvedAssets(data);
@@ -1531,6 +1532,17 @@ function lcRenderStyles(data) {
   card.style.display = '';
   document.getElementById('lcStylesCount').textContent = s.count;
   document.getElementById('lcStylesBody').innerHTML = lcExamples(s.examples) ||
+    '<div class="text-muted small">—</div>';
+}
+
+// Pages missing a cq:robotsTags the CSV says they should have (fixable — set on jcr:content).
+function lcRenderRobots(data) {
+  const card = document.getElementById('lcRobotsCard');
+  const s = data.missingRobots || { count: 0, examples: [] };
+  if (!s.count) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  document.getElementById('lcRobotsCount').textContent = s.count;
+  document.getElementById('lcRobotsBody').innerHTML = lcExamples(s.examples) ||
     '<div class="text-muted small">—</div>';
 }
 
@@ -1730,8 +1742,8 @@ async function lcFix(checks) {
     // checks === null → "Fix all": the 5 checks + image alt text + custom-image captions, PLUS cross-locale when ready.
     const mappings = lcCrossLocaleMappings();
     let sel = checks;
-    if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'styles', 'crossLocale']
-                                    : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'styles'];
+    if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'styles', 'robots', 'crossLocale']
+                                    : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'styles', 'robots'];
     const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel, overwrite: lcOverwriteMeta() };
     if (sel.includes('crossLocale')) body.crossLocaleMappings = mappings;
     if (sel.some(c => c === 'pdf' || c === 'dam' || c === 'scene7')) body.customAssetMappings = lcCustomAssetMappings();
