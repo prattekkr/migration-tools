@@ -1558,10 +1558,14 @@ const LC_A11Y_HINT = {
 function lcRenderAccessibility(data) {
   const card = document.getElementById('lcA11yCard');
   const list = data.accessibility || [];
-  if (!list.length) { card.style.display = 'none'; return; }
   card.style.display = '';
   const total = list.reduce((s, a) => s + a.count, 0);
   document.getElementById('lcA11yCount').textContent = total;
+  if (!list.length) {
+    document.getElementById('lcA11yBody').innerHTML =
+      '<div class="text-muted small">No accessibility findings. You can still refresh existing image alt text from DAM metadata.</div>';
+    return;
+  }
   document.getElementById('lcA11yBody').innerHTML = list.map((a, i) => {
     const pageOf = p => p.replace(/\/(?:_?jcr_content|\.content\.xml).*$/i, '').replace(/\.content\.xml$/i, '');
     const samples = (a.samples || []).map(s => `
@@ -1711,8 +1715,8 @@ function lcCrossLocaleMappings() {
   return [...groups, ...custom].filter(m => m.from && m.to);
 }
 
-// Whether to overwrite alt/captions already authored in the ZIP (else only empty ones are filled).
-function lcOverwriteMeta() { return document.getElementById('lcOverwriteMeta')?.checked || false; }
+// Alt text is always refreshed; only captions have an overwrite choice.
+function lcOverwriteCaptions() { return document.getElementById('lcOverwriteCaptions')?.checked || false; }
 
 // internalDomains = the domains NOT ticked as external
 function lcInternalDomains() {
@@ -1744,7 +1748,7 @@ async function lcFix(checks) {
     let sel = checks;
     if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'styles', 'robots', 'crossLocale']
                                     : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'styles', 'robots'];
-    const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel, overwrite: lcOverwriteMeta() };
+    const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel, overwrite: lcOverwriteCaptions() };
     if (sel.includes('crossLocale')) body.crossLocaleMappings = mappings;
     if (sel.some(c => c === 'pdf' || c === 'dam' || c === 'scene7')) body.customAssetMappings = lcCustomAssetMappings();
     const res = await fetch('/api/link-checker/fix', {
@@ -1754,6 +1758,7 @@ async function lcFix(checks) {
     const pages = res.headers.get('X-Pages-Fixed');
     const changes = res.headers.get('X-Change-Count');
     const unmatched = res.headers.get('X-Unmatched');
+    const altSkipped = parseInt(res.headers.get('X-Alt-Skipped') || '0', 10);
     const reportId = res.headers.get('X-Report-Id');
     const persisted = parseInt(res.headers.get('X-Custom-Persisted') || '0', 10);
     const persistEnvs = res.headers.get('X-Persist-Envs') || '';
@@ -1764,6 +1769,7 @@ async function lcFix(checks) {
     URL.revokeObjectURL(url);
     status.className = 'small mt-2 text-success';
     status.textContent = `✓ Fixed ${changes} reference(s) across ${pages} page(s)${unmatched > 0 ? `, ${unmatched} unmatched (no CSV entry)` : ''}. ZIP downloaded.`
+      + (altSkipped > 0 ? ` Skipped alt refresh for ${altSkipped} asset(s); existing text retained (see report).` : '')
       + (recovered > 0 ? ` Recovered ${recovered} asset(s) from AEM author — synced to all env asset-maps.` : '')
       + (persisted > 0 ? ` Saved ${persisted} manual mapping(s) to the asset-map for: ${persistEnvs.replace(/,/g, ', ')} (per-env host).` : '');
     if (reportId) {
@@ -1775,7 +1781,7 @@ async function lcFix(checks) {
   } catch (e) { status.className = 'small mt-2 text-danger'; status.textContent = e.message; }
 }
 
-// Auto-fill missing image alt text from each asset's DAM metadata dc:title.
+// Refresh existing, empty and missing image alt text from DAM metadata.
 async function lcFixAlt() {
   if (!lcSessionId) { alert('Scan first.'); return; }
   const siteRoot = document.getElementById('lcSiteRoot').value.trim();
@@ -1785,11 +1791,11 @@ async function lcFixAlt() {
   if (!env) { status.className = 'small w-100 mt-1 text-danger'; status.textContent = 'Select a target environment first — needed to read the DAM metadata.'; return; }
   btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Filling…';
   status.className = 'small w-100 mt-1 text-muted';
-  status.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Reading dc:title from each asset’s metadata…';
+  status.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Refreshing image alt text from DAM metadata…';
   try {
     const res = await fetch('/api/link-checker/fix-alt', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env, overwrite: lcOverwriteMeta() }),
+      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env }),
     });
     if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Alt-text fix failed'); }
     const filled  = res.headers.get('X-Alt-Filled');
@@ -1801,12 +1807,12 @@ async function lcFixAlt() {
     const a = document.createElement('a'); a.href = url; a.download = 'alt-fixed-package.zip'; a.click();
     URL.revokeObjectURL(url);
     status.className = 'small w-100 mt-1 text-success';
-    status.innerHTML = `✓ Filled alt on <strong>${filled}</strong> image(s) across ${pages} page(s)` +
-      (skipped > 0 ? `, ${skipped} skipped (see report)` : '') + `. ZIP downloaded.` +
+    status.innerHTML = `✓ Refreshed <strong>${filled}</strong> alt value(s) across ${pages} page(s)` +
+      (skipped > 0 ? `, ${skipped} asset(s) skipped; existing text retained (see report)` : '') + `. ZIP downloaded.` +
       (reportId ? ` — <a href="/api/link-checker/fix-report/${reportId}">download report CSV</a>` : '');
     await lcScan();   // refresh — session now holds the alt-filled package
   } catch (e) { status.className = 'small w-100 mt-1 text-danger'; status.textContent = e.message; }
-  finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-magic me-1"></i>Fill alt text'; }
+  finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-magic me-1"></i>Refresh alt text'; }
 }
 
 // Fill the caption on custom-image blocks (only empty ones) from DAM metadata — separate action.
@@ -1823,7 +1829,7 @@ async function lcFixCaption() {
   try {
     const res = await fetch('/api/link-checker/fix-caption', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env, overwrite: lcOverwriteMeta() }),
+      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env, overwrite: lcOverwriteCaptions() }),
     });
     if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Caption fill failed'); }
     const filled  = res.headers.get('X-Caption-Filled');
