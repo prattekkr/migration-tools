@@ -1369,6 +1369,7 @@
                     <li>Per-category fixes stack: fix one type, re-scan, fix another. Nothing changes unless it matches.</li>
                     <li><em>Refresh alt text</em> and <em>Fix all</em> replace supported component image alt values from DAM metadata (<code>dc:description</code> → <code>dc:title</code> → filename), even when already populated. Decorative images are skipped; failed lookups retain existing text and are reported. Rich-text image alt findings still need manual fixes.</li>
                     <li>Alt refresh remains available with no accessibility findings. <em>Overwrite captions</em> controls captions only; existing captions are otherwise preserved.</li>
+                    <li>For Brightcove blocks (<code>brightcove</code>, <code>brightcove-video</code> or <code>custom-brightcove</code> component/model), <code>posterImage</code> uses <code>posterAccessibilityLabel</code>. Other blocks retain the normal <code>&lt;imageProperty&gt;Alt</code> naming.</li>
                     <li>Preview package pages are included in explicit alt refresh, including <em>Fix all</em>. They remain excluded from ordinary QA scans and other fixes; drafts, config and navigation content remain excluded from alt refresh too.</li>
                   </ul>
                 </div>

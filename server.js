@@ -3059,18 +3059,26 @@ const isImgAssetVal = v => /\/content\/dam\/|\/adobe\/assets\/|\.scene7\.com|\.(
 // Scene7 image URL). Stricter than isImgAssetVal so PDFs / content fragments are excluded.
 const isImageRef = v => /\.(?:jpe?g|png|gif|webp|svg|avif|tiff?|bmp)(?:[?#&"]|$)/i.test(v || '') || /\.scene7\.com|\/is\/image\//i.test(v || '');
 
+const isBrightcoveNode = attrs => [attrs.auecomponentid, attrs.model]
+  .some(id => ['brightcove', 'brightcove-video', 'custom-brightcove'].includes((id || '').trim().toLowerCase()));
+
 // Per the AbbVie EDS convention, an image's alt lives in a SIBLING property named
 // "<imageProp>Alt" (e.g. image→imageAlt, background→backgroundAlt, backgroundImage→
-// backgroundImageAlt). Returns one entry per image-reference property on a node:
+// backgroundImageAlt). Brightcove posterImage uses posterAccessibilityLabel instead.
+// Returns one entry per image-reference property on a node:
 // { prop (raw name), value, altKey (lowercased sibling), altRaw (sibling to write), altValue }.
 function imageAltProps(attrs, raw) {
   const SKIP = new Set(['href', 'link', 'ctalink', 'url', 'linkurl', 'link-url']);
   const list = [];
+  const brightcove = isBrightcoveNode(attrs);
   for (const ln in attrs) {
     if (/(?:alt|caption)$/i.test(ln) || SKIP.has(ln)) continue;
+    if (brightcove && ln === 'posteraccessibilitylabel') continue;
     if (!isImageRef(attrs[ln])) continue;
     const rawName = raw[ln] || ln;
-    list.push({ prop: rawName, value: attrs[ln], altKey: ln + 'alt', altRaw: rawName + 'Alt', altValue: attrs[ln + 'alt'] });
+    const altName = brightcove && ln === 'posterimage' ? 'posterAccessibilityLabel' : rawName + 'Alt';
+    const altKey = altName.toLowerCase();
+    list.push({ prop: rawName, value: attrs[ln], altKey, altRaw: raw[altKey] || altName, altValue: attrs[altKey] });
   }
   return list;
 }
