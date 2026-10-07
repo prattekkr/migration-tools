@@ -2550,8 +2550,7 @@ function scanUnsupportedStyles(xml, vocab) {
   return out;
 }
 
-// Fix: move unsupported dynamic classes into the sibling free-form *_commonCustomClass property
-// (comma-appended, deduped), leaving only vocabulary classes in *_customDynamicClass.
+// Fix: drop unsupported dynamic classes, leaving free-form classes unchanged.
 function qaFixUnsupportedStyles(xml, vocab) {
   const changes = [];
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
@@ -2569,16 +2568,9 @@ function qaFixUnsupportedStyles(xml, vocab) {
       const unsupported = tokens.filter(t => !allowed.has(t));
       if (!unsupported.length) continue;
       const supported  = tokens.filter(t => allowed.has(t));
-      const commonName = dynName.replace(/customDynamicClass$/i, 'commonCustomClass');
-      const existing   = (attrs[commonName.toLowerCase()] || '').split(',').map(t => t.trim()).filter(Boolean);
-      const merged     = [...new Set([...existing, ...unsupported])];
-      out = out.replace(new RegExp('(\\s' + escRe(dynName) + '=")[^"]*(")'), `$1${xmlAttrEscape(supported.join(','))}$2`);   // keep only vocabulary classes
-      const mergedVal = xmlAttrEscape(merged.join(','));
-      if (attrs[commonName.toLowerCase()] !== undefined)
-        out = out.replace(new RegExp('(\\s' + escRe(commonName) + '=")[^"]*(")'), `$1${mergedVal}$2`);                       // append to existing free-form
-      else
-        out += ` ${commonName}="${mergedVal}"`;                                                                             // or add the free-form property
-      changes.push({ node, block: key, prop: dynName, moved: unsupported, to: commonName });
+      const value = supported.join(',');
+      out = out.replace(new RegExp('(\\s' + escRe(dynName) + '=")[^"]*(")'), (_, pre, post) => pre + xmlAttrEscape(value) + post);
+      changes.push({ node, block: key, prop: dynName, removed: unsupported, value });
       changed = true;
     }
     return changed ? `<${node}${out}${tail}>` : full;
@@ -2690,7 +2682,7 @@ async function buildQaFixedZip(buffer, opts) {
           for (const ch of al.changes) changes.push({ file, type: 'alt-text', oldUrl: ch.value, newUrl: `${ch.altProp}="${ch.alt}"` });
           for (const ch of cp.changes) changes.push({ file, type: 'caption',  oldUrl: ch.value, newUrl: `caption="${ch.caption}"` });
           for (const ch of a.changes) changes.push({ file, type: 'absolute',     ...ch });
-          for (const ch of st.changes) changes.push({ file, type: 'unsupported-style', oldUrl: `${ch.prop}: ${ch.moved.join(',')}`, newUrl: `moved to ${ch.to}` });
+          for (const ch of st.changes) changes.push({ file, type: 'unsupported-style', oldUrl: `${ch.prop}: ${ch.removed.join(',')}`, newUrl: `${ch.prop}="${ch.value}" (unsupported classes removed)` });
           for (const ch of rob.changes) changes.push({ file, type: 'robots-tags', oldUrl: '(missing)', newUrl: `cq:robotsTags="[${ch.value}]"` });
           for (const ch of b.changes) changes.push({ file, type: 'asset-dm',     ...ch });
           for (const ch of c.changes) changes.push({ file, type: 'short-path',   ...ch });

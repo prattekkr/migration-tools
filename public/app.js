@@ -1524,7 +1524,7 @@ async function lcRefreshStyleVocab() {
   finally { btn.disabled = false; btn.innerHTML = old; }
 }
 
-// Unsupported dynamic-picklist style classes (fixable — moved to *_commonCustomClass).
+// Unsupported dynamic-picklist style classes (fixable — removed from the dynamic field).
 function lcRenderStyles(data) {
   const card = document.getElementById('lcStylesCard');
   const s = data.unsupportedStyles || { count: 0, examples: [] };
