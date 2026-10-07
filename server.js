@@ -2757,13 +2757,16 @@ function normalizeDeliveryUrls(s) {
   return s.replace(/(\/adobe\/assets\/[^"'<>\s]*?)dpr=off\b/gi, '$1dpr=1');
 }
 
+// Caption filling is disabled pending a rule review; the code is kept so it can be re-enabled.
+const LC_CAPTION_FILL_ENABLED = false;
+
 // Apply all QA fixes to every Franklin page in the ZIP (nested or flat).
 // Order: absolute → asset→DM → short-paths (so each step's output is safe for the next).
 async function buildQaFixedZip(buffer, opts) {
   const { siteRoot, internalHosts, pathMap, scene7Map, damNorm, crossLocaleMappings, altByValue, captionByValue, overwriteCaptions } = opts;
   const sel        = opts.checks || new Set(['shortPath', 'absolute', 'pdf', 'dam', 'scene7']);
   const doAlt      = sel.has('alt') && altByValue && altByValue.size > 0;
-  const doCaption  = sel.has('caption') && captionByValue && captionByValue.size > 0;
+  const doCaption  = LC_CAPTION_FILL_ENABLED && sel.has('caption') && captionByValue && captionByValue.size > 0;
   const assetWhich = { pdf: sel.has('pdf'), dam: sel.has('dam'), scene7: sel.has('scene7') };
   const doAsset    = assetWhich.pdf || assetWhich.dam || assetWhich.scene7;
   const doStyles   = sel.has('styles');
@@ -2885,6 +2888,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
   const R = siteRoot.replace(/\/$/, '');
   const internalHosts = new Set((internalDomains || []).map(h => String(h).toLowerCase()));
   const sel      = new Set(Array.isArray(checks) && checks.length ? checks : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7']);
+  if (!LC_CAPTION_FILL_ENABLED) sel.delete('caption');
   const needsCsv = sel.has('pdf') || sel.has('dam') || sel.has('scene7') || sel.has('alt') || sel.has('caption');
   if (req.body.styleSelections !== undefined && !Array.isArray(req.body.styleSelections))
     return res.status(400).json({ error: 'Style selections must be an array.' });
@@ -3655,6 +3659,7 @@ app.post('/api/link-checker/fix-alt', express.json({ limit: '1mb' }), async (req
 // POST /api/link-checker/fix-caption — fill the `caption` on custom-image blocks (only)
 // whose caption is empty, using the same DAM-metadata chain as alt (description→title→filename).
 app.post('/api/link-checker/fix-caption', express.json({ limit: '1mb' }), async (req, res) => {
+  if (!LC_CAPTION_FILL_ENABLED) return res.status(410).json({ error: 'Caption filling is disabled.' });
   const { sessionId, siteRoot, env, overwrite } = req.body;
   const buffer = lcSessions.get(sessionId);
   if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });

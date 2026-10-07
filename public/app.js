@@ -1739,9 +1739,6 @@ function lcCrossLocaleMappings() {
   return [...groups, ...custom].filter(m => m.from && m.to);
 }
 
-// DAM description/title refresh alt; filename fallback preserves authored text.
-function lcOverwriteCaptions() { return document.getElementById('lcOverwriteCaptions')?.checked || false; }
-
 // internalDomains = the domains NOT ticked as external
 function lcInternalDomains() {
   return [...document.querySelectorAll('#lcDomains input[type=checkbox]')]
@@ -1767,12 +1764,12 @@ async function lcFix(checks) {
   const status   = document.getElementById('lcFixStatus');
   status.className = 'small mt-2 text-muted'; status.textContent = 'Fixing…';
   try {
-    // checks === null → "Fix all": the 5 checks + image alt text + custom-image captions, PLUS cross-locale when ready.
+    // checks === null → "Fix all": the 5 checks + image alt text, styles and robots, PLUS cross-locale when ready.
     const mappings = lcCrossLocaleMappings();
     let sel = checks;
-    if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'styles', 'robots', 'crossLocale']
-                                    : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'styles', 'robots'];
-    const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel, overwrite: lcOverwriteCaptions() };
+    if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'styles', 'robots', 'crossLocale']
+                                    : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'styles', 'robots'];
+    const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel };
     if (sel.includes('styles')) body.styleSelections = lcStyleSelections();
     if (sel.includes('crossLocale')) body.crossLocaleMappings = mappings;
     if (sel.some(c => c === 'pdf' || c === 'dam' || c === 'scene7')) body.customAssetMappings = lcCustomAssetMappings();
@@ -1842,40 +1839,6 @@ async function lcFixAlt() {
     await lcScan();   // refresh — session now holds the alt-filled package
   } catch (e) { status.className = 'small w-100 mt-1 text-danger'; status.textContent = e.message; }
   finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-magic me-1"></i>Refresh alt text'; }
-}
-
-// Fill the caption on custom-image blocks (only empty ones) from DAM metadata — separate action.
-async function lcFixCaption() {
-  if (!lcSessionId) { alert('Scan first.'); return; }
-  const siteRoot = document.getElementById('lcSiteRoot').value.trim();
-  const env      = document.getElementById('lcEnv').value;
-  const btn      = document.getElementById('lcFillCaptionBtn');
-  const status   = document.getElementById('lcCaptionStatus');
-  if (!env) { status.className = 'small w-100 text-danger'; status.textContent = 'Select a target environment first — needed to read the DAM metadata.'; return; }
-  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Filling…';
-  status.className = 'small w-100 text-muted';
-  status.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Filling custom-image captions from asset metadata…';
-  try {
-    const res = await fetch('/api/link-checker/fix-caption', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env, overwrite: lcOverwriteCaptions() }),
-    });
-    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Caption fill failed'); }
-    const filled  = res.headers.get('X-Caption-Filled');
-    const skipped = res.headers.get('X-Caption-Skipped');
-    const pages   = res.headers.get('X-Pages-Fixed');
-    const reportId = res.headers.get('X-Report-Id');
-    const blob = await res.blob();
-    const url  = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'caption-fixed-package.zip'; a.click();
-    URL.revokeObjectURL(url);
-    status.className = 'small w-100 text-success';
-    status.innerHTML = `✓ Filled captions on <strong>${filled}</strong> custom-image block(s) across ${pages} page(s)` +
-      (skipped > 0 ? `, ${skipped} skipped (see report)` : '') + `. ZIP downloaded.` +
-      (reportId ? ` — <a href="/api/link-checker/fix-report/${reportId}">download report CSV</a>` : '');
-    await lcScan();   // refresh — session now holds the caption-filled package
-  } catch (e) { status.className = 'small w-100 text-danger'; status.textContent = e.message; }
-  finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-card-text me-1"></i>Fill captions'; }
 }
 
 // ─── Migration QA report (dry-run preview) ────────────────────────────────────
