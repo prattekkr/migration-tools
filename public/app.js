@@ -1532,10 +1532,31 @@ function lcRenderStyles(data) {
   card.style.display = '';
   document.getElementById('lcStylesCount').textContent = s.count;
   const review = s.singleSelectConflicts
-    ? `<div class="alert alert-warning py-2 small">${s.singleSelectConflicts} single-select group conflict(s) require manual review. Fix preserves these selections; choose one option per group.</div>`
+    ? `<div class="alert alert-warning py-2 small">${s.singleSelectConflicts} single-select group conflict(s). Choose a class to keep below, then click Fix or Fix all. Conflicts without a choice stay unchanged.</div>`
     : '';
-  document.getElementById('lcStylesBody').innerHTML = review + (lcExamples(s.examples) ||
-    '<div class="text-muted small">—</div>');
+  const choices = (s.conflicts || []).map((conflict, index) => `
+    <div class="border rounded p-2 mb-2">
+      <label class="small fw-semibold d-block mb-1" for="lcStyleChoice${index}">
+        ${escHtml(conflict.node)} #${conflict.nodeIndex} [${escHtml(conflict.block)}]
+        — ${escHtml(conflict.group)} (${escHtml(conflict.prop)})
+      </label>
+      <code class="small d-block mb-2" style="word-break:break-all">${escHtml(conflict.file)}</code>
+      <select class="form-select form-select-sm" id="lcStyleChoice${index}">
+        <option value="">Choose class to keep — leave unresolved</option>
+        ${conflict.selected.map(value => `<option value="${escHtml(value)}">${escHtml(value)}</option>`).join('')}
+      </select>
+    </div>`).join('');
+  const examples = lcExamples((s.examples || []).filter(example => example.issue !== 'single-select-conflict'));
+  document.getElementById('lcStylesBody').innerHTML = review +
+    (choices ? `<div style="max-height:400px;overflow:auto">${choices}</div>` : '') +
+    (examples || (choices ? '' : '<div class="text-muted small">—</div>'));
+}
+
+function lcStyleSelections() {
+  return (lcAnalysis?.unsupportedStyles?.conflicts || []).flatMap((conflict, index) => {
+    const keep = document.getElementById(`lcStyleChoice${index}`)?.value;
+    return keep ? [{ id: conflict.id, keep, selected: conflict.selected }] : [];
+  });
 }
 
 // Pages missing a cq:robotsTags the CSV says they should have (fixable — set on jcr:content).
@@ -1752,6 +1773,7 @@ async function lcFix(checks) {
     if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'styles', 'robots', 'crossLocale']
                                     : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'caption', 'styles', 'robots'];
     const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel, overwrite: lcOverwriteCaptions() };
+    if (sel.includes('styles')) body.styleSelections = lcStyleSelections();
     if (sel.includes('crossLocale')) body.crossLocaleMappings = mappings;
     if (sel.some(c => c === 'pdf' || c === 'dam' || c === 'scene7')) body.customAssetMappings = lcCustomAssetMappings();
     const res = await fetch('/api/link-checker/fix', {
@@ -1763,6 +1785,7 @@ async function lcFix(checks) {
     const unmatched = res.headers.get('X-Unmatched');
     const altSkipped = parseInt(res.headers.get('X-Alt-Skipped') || '0', 10);
     const styleConflicts = parseInt(res.headers.get('X-Style-Conflicts') || '0', 10);
+    const styleResolved = parseInt(res.headers.get('X-Style-Resolved') || '0', 10);
     const reportId = res.headers.get('X-Report-Id');
     const persisted = parseInt(res.headers.get('X-Custom-Persisted') || '0', 10);
     const persistEnvs = res.headers.get('X-Persist-Envs') || '';
@@ -1774,6 +1797,7 @@ async function lcFix(checks) {
     status.className = `small mt-2 ${styleConflicts > 0 ? 'text-warning' : 'text-success'}`;
     status.textContent = `✓ Fixed ${changes} reference(s) across ${pages} page(s)${unmatched > 0 ? `, ${unmatched} unmatched (no CSV entry)` : ''}. ZIP downloaded.`
       + (altSkipped > 0 ? ` Skipped alt refresh for ${altSkipped} asset(s); existing text retained (see report).` : '')
+      + (styleResolved > 0 ? ` Applied ${styleResolved} single-select style choice(s).` : '')
       + (styleConflicts > 0 ? ` ${styleConflicts} single-select style conflict(s) require manual review; selections retained (see report).` : '')
       + (recovered > 0 ? ` Recovered ${recovered} asset(s) from AEM author — synced to all env asset-maps.` : '')
       + (persisted > 0 ? ` Saved ${persisted} manual mapping(s) to the asset-map for: ${persistEnvs.replace(/,/g, ', ')} (per-env host).` : '');

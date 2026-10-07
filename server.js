@@ -2233,10 +2233,11 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
     const styleVocab = loadStyleVocab();
     const stylesAgg = mk();               // unsupported dynamic-picklist style classes
     let styleConflictCount = 0;
+    const styleConflicts = [];
     const robotsMap = loadRobotsMap();
     const robotsAgg = mk();               // pages missing a cq:robotsTags the CSV says they should have
 
-    const addEx = (c, file, url) => { c.count++; c.files.add(file); c.examples.push({ file, url }); };   // return all (client lists/filters them)
+    const addEx = (c, file, url, detail = {}) => { c.count++; c.files.add(file); c.examples.push({ file, url, ...detail }); };   // return all (client lists/filters them)
 
     for (const entry of zip.getEntries()) {
       if (entry.isDirectory || !entry.entryName.endsWith('.xml')) continue;
@@ -2290,10 +2291,14 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
       for (const s of scanUnsupportedStyles(region, styleVocab)) {
         if (s.issue === 'single-select-conflict') {
           styleConflictCount++;
-          addEx(stylesAgg, file, `${s.node} [${s.block}] ${s.prop}: single-select group "${s.group}" has multiple selections: ${s.selected.join(', ')} (manual review)`);
+          const conflict = { file, ...s };
+          styleConflicts.push({ ...conflict, id: styleConflictKey(conflict) });
+          addEx(stylesAgg, file, `${s.node} [${s.block}] ${s.prop}: single-select group "${s.group}" has multiple selections: ${s.selected.join(', ')} (manual review)`, { issue: s.issue });
         } else {
           addEx(stylesAgg, file, s.issue === 'undeclared-field'
             ? `${s.node} [${s.block}] ${s.prop}: not declared in modelFields`
+            : s.issue === 'cta-default-redundant'
+              ? `${s.node} [${s.block}] ${s.prop}: back-cta is present; auto-fix removes default-cta`
             : `${s.node} [${s.block}] ${s.prop}: ${s.unsupported.join(', ')}`);
         }
       }
@@ -2342,7 +2347,7 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
       crossLocale: { count: crossCount, files: crossFilesSet.size, groups: crossGroupsArr, unresolved: pack(crossUnresolved) },
       unresolvedAssets: [...unresolvedAssets.values()].sort((a, b) => b.count - a.count),
       accessibility,
-      unsupportedStyles: { ...pack(stylesAgg), singleSelectConflicts: styleConflictCount },
+      unsupportedStyles: { ...pack(stylesAgg), singleSelectConflicts: styleConflictCount, conflicts: styleConflicts },
       missingRobots: pack(robotsAgg),
     });
   } catch (err) {
@@ -2595,11 +2600,18 @@ function styleFieldFindings(attrs, raw, vocab) {
       block, prop: raw[ln], issue: 'unsupported-class', value: attrs[ln], unsupported,
       replacementValue: tokens.filter(t => allowed.has(t)).join(','),
     });
+    const preferBackCta = key === 'cta' && tokens.includes('back-cta') && tokens.includes('default-cta');
+    if (preferBackCta) findings.push({
+      block, prop: raw[ln], issue: 'cta-default-redundant', value: attrs[ln],
+      unsupported: ['default-cta'],
+      replacementValue: tokens.filter(token => allowed.has(token) && token !== 'default-cta').join(','),
+    });
+    const groupTokens = preferBackCta ? tokens.filter(token => token !== 'default-cta') : tokens;
     const groups = Array.isArray(vocab[key]) ? [] : (vocab[key].groups || []);
     for (const group of groups) {
       if (group.selectMultiple !== false || group.name === '(ungrouped)') continue;
       const options = new Set(group.options.map(option => option.value));
-      const selected = [...new Set(tokens.filter(token => options.has(token)))];
+      const selected = [...new Set(groupTokens.filter(token => options.has(token)))];
       if (selected.length > 1) findings.push({
         block, prop: raw[ln], issue: 'single-select-conflict', value: attrs[ln],
         group: group.name, selected,
@@ -2612,36 +2624,74 @@ function styleFieldFindings(attrs, raw, vocab) {
 // Scan for undeclared fields, non-picklist classes and single-select conflicts.
 function scanUnsupportedStyles(xml, vocab) {
   const out = [];
+  const nodeCounts = new Map();
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)\s*\/?>/g;
   let m;
   while ((m = elRe.exec(xml))) {
+    const nodeIndex = (nodeCounts.get(m[1]) || 0) + 1;
+    nodeCounts.set(m[1], nodeIndex);
     const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
     while ((a = aRe.exec(m[2]))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
-    for (const finding of styleFieldFindings(attrs, raw, vocab)) out.push({ node: m[1], ...finding });
+    for (const finding of styleFieldFindings(attrs, raw, vocab)) out.push({ node: m[1], nodeIndex, ...finding });
   }
   return out;
 }
 
-// Fix: remove undeclared style fields and drop unsupported dynamic classes.
-function qaFixUnsupportedStyles(xml, vocab) {
+function styleConflictKey({ file, node, nodeIndex, prop, group }) {
+  return JSON.stringify([file, node, nodeIndex, prop, group]);
+}
+
+function collectStyleConflicts(buffer, vocab) {
+  const outer = new AdmZip(buffer);
+  const inner = outer.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
+  const zip = inner ? new AdmZip(inner.getData()) : outer;
+  const conflicts = [];
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory || !entry.entryName.endsWith('.xml') || lcIsSkipped(entry.entryName)) continue;
+    const xml = entry.getData().toString('utf8');
+    if (!isFranklinPage(xml)) continue;
+    const file = entry.entryName.replace(/^jcr_root/, '');
+    for (const finding of scanUnsupportedStyles(franklinBlockRegion(xml).region, vocab))
+      if (finding.issue === 'single-select-conflict') conflicts.push({ file, ...finding });
+  }
+  return conflicts;
+}
+
+// CTA back-cta wins over default-cta; other single-select conflicts need explicit choices.
+function qaFixUnsupportedStyles(xml, vocab, selections = new Map(), file = '') {
   const changes = [], conflicts = [];
+  const nodeCounts = new Map();
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
   const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const result = xml.replace(elRe, (full, node, attrStr, tail) => {
+    const nodeIndex = (nodeCounts.get(node) || 0) + 1;
+    nodeCounts.set(node, nodeIndex);
     const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
     while ((a = aRe.exec(attrStr))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
     const findings = styleFieldFindings(attrs, raw, vocab);
     let out = attrStr;
     for (const finding of findings) {
       if (finding.issue === 'single-select-conflict') {
-        conflicts.push({ node, ...finding });
+        const keep = selections.get(styleConflictKey({ file, node, nodeIndex, ...finding }));
+        if (keep === undefined) {
+          conflicts.push({ node, nodeIndex, ...finding });
+          continue;
+        }
+        if (!finding.selected.includes(keep)) throw new Error(`Invalid style choice for ${node}: ${finding.group}.`);
+        const ln = finding.prop.toLowerCase();
+        const value = attrs[ln].split(',').map(token => token.trim()).filter(Boolean)
+          .filter(token => !finding.selected.includes(token) || token === keep).join(',');
+        out = out.replace(new RegExp('(\\s' + escRe(finding.prop) + '=")[^"]*(")'), (_, pre, post) => pre + xmlAttrEscape(value) + post);
+        attrs[ln] = value;
+        changes.push({ node, nodeIndex, block: finding.block, prop: finding.prop, resolvedGroup: finding.group, kept: keep, removed: finding.selected.filter(token => token !== keep), value });
       } else if (finding.issue === 'undeclared-field') {
         out = out.replace(new RegExp('\\s+' + escRe(finding.prop) + '="[^"]*"'), '');
         changes.push({ node, block: finding.block, prop: finding.prop, removedField: true, oldValue: finding.value });
       } else {
         const value = finding.replacementValue;
         out = out.replace(new RegExp('(\\s' + escRe(finding.prop) + '=")[^"]*(")'), (_, pre, post) => pre + xmlAttrEscape(value) + post);
-        changes.push({ node, block: finding.block, prop: finding.prop, removed: finding.unsupported, value });
+        attrs[finding.prop.toLowerCase()] = value;
+        changes.push({ node, block: finding.block, prop: finding.prop, removed: finding.unsupported, value, ctaDefaultRemoved: finding.issue === 'cta-default-redundant' });
       }
     }
     return findings.length ? `<${node}${out}${tail}>` : full;
@@ -2746,7 +2796,7 @@ async function buildQaFixedZip(buffer, opts) {
           const c = qaPage && sel.has('shortPath') ? qaFixShortPaths(body, siteRoot) : { result: body, changes: [] }; body = c.result;
           const pageLocale = qaLocaleRootOf(file, siteRoot);
           const x = (qaPage && sel.has('crossLocale') && crossLocaleMappings?.length) ? qaFixCrossLocale(body, crossLocaleMappings, pageLocale) : { result: body, changes: [] }; body = x.result;
-          const st = qaPage && doStyles ? qaFixUnsupportedStyles(body, styleVocab) : { result: body, changes: [], conflicts: [] }; body = st.result;
+          const st = qaPage && doStyles ? qaFixUnsupportedStyles(body, styleVocab, opts.styleSelections, file) : { result: body, changes: [], conflicts: [] }; body = st.result;
           body = unmaskProtected(body, protectedVals);   // restore cq:template/tags/MSM refs before writing back
           const rob = qaPage && doRobots ? qaFixRobotsTags(pre + body + post, robotsPagePath(file), robotsMap) : { result: pre + body + post, changes: [] };
           const after = qaPage ? sanitizeXmlEntities(normalizeDeliveryUrls(rob.result)) : rob.result;
@@ -2754,9 +2804,12 @@ async function buildQaFixedZip(buffer, opts) {
           for (const ch of cp.changes) changes.push({ file, type: 'caption',  oldUrl: ch.value, newUrl: `caption="${ch.caption}"` });
           for (const ch of a.changes) changes.push({ file, type: 'absolute',     ...ch });
           for (const ch of st.changes) changes.push({
-            file, type: 'unsupported-style',
+            file, type: ch.resolvedGroup ? 'single-select-style-resolution' : ch.ctaDefaultRemoved ? 'cta-default-cleanup' : 'unsupported-style',
             oldUrl: ch.removedField ? `${ch.prop}="${ch.oldValue}"` : `${ch.prop}: ${ch.removed.join(',')}`,
-            newUrl: ch.removedField ? `${ch.prop} removed (not declared in modelFields)` : `${ch.prop}="${ch.value}" (unsupported classes removed)`,
+            newUrl: ch.removedField ? `${ch.prop} removed (not declared in modelFields)`
+              : ch.resolvedGroup ? `${ch.node} #${ch.nodeIndex} ${ch.prop}="${ch.value}" (kept ${ch.kept} for group "${ch.resolvedGroup}")`
+              : ch.ctaDefaultRemoved ? `${ch.prop}="${ch.value}" (default-cta removed because back-cta is present)`
+              : `${ch.prop}="${ch.value}" (unsupported classes removed)`,
           });
           for (const conflict of st.conflicts) styleConflicts.push({ file, ...conflict });
           for (const ch of rob.changes) changes.push({ file, type: 'robots-tags', oldUrl: '(missing)', newUrl: `cq:robotsTags="[${ch.value}]"` });
@@ -2833,6 +2886,11 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
   const internalHosts = new Set((internalDomains || []).map(h => String(h).toLowerCase()));
   const sel      = new Set(Array.isArray(checks) && checks.length ? checks : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7']);
   const needsCsv = sel.has('pdf') || sel.has('dam') || sel.has('scene7') || sel.has('alt') || sel.has('caption');
+  if (req.body.styleSelections !== undefined && !Array.isArray(req.body.styleSelections))
+    return res.status(400).json({ error: 'Style selections must be an array.' });
+  const requestedStyleSelections = req.body.styleSelections || [];
+  if (requestedStyleSelections.length && !sel.has('styles'))
+    return res.status(400).json({ error: 'Include the styles check to apply style selections.' });
 
   // Cross-locale prefix mappings: [{from, to}] — both must be /content/ paths. Longest source first.
   const crossLocaleMappings = (Array.isArray(req.body.crossLocaleMappings) ? req.body.crossLocaleMappings : [])
@@ -2850,6 +2908,23 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
     .filter(m => m && typeof m.from === 'string' && typeof m.to === 'string' && m.from && /^https?:\/\//i.test(m.to));
 
   try {
+    const styleSelections = new Map();
+    if (requestedStyleSelections.length) {
+      const available = new Map(collectStyleConflicts(buffer, loadStyleVocab()).map(conflict => [styleConflictKey(conflict), conflict]));
+      for (const choice of requestedStyleSelections) {
+        if (!choice || typeof choice.id !== 'string' || typeof choice.keep !== 'string' ||
+            !Array.isArray(choice.selected) || !choice.selected.every(value => typeof value === 'string'))
+          return res.status(400).json({ error: 'Each style selection must include a conflict id, a class to keep, and the scanned selections.' });
+        if (styleSelections.has(choice.id))
+          return res.status(400).json({ error: 'Duplicate style selection for the same conflict.' });
+        const conflict = available.get(choice.id);
+        if (!conflict || JSON.stringify([...choice.selected].sort()) !== JSON.stringify([...conflict.selected].sort()))
+          return res.status(400).json({ error: 'A selected style conflict has changed or no longer exists. Re-scan the package and choose again.' });
+        if (!conflict.selected.includes(choice.keep))
+          return res.status(400).json({ error: `Choose one of the conflicting classes for group "${conflict.group}".` });
+        styleSelections.set(choice.id, choice.keep);
+      }
+    }
     let pathMap = null, scene7Map = null, damNorm = null, se = null, uuidToRow = null;
     if (needsCsv) {
       if (env && fs.existsSync(csvPath(env))) {
@@ -2900,7 +2975,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
       if (host && sel.has('caption')) captionByValue = (await computeCaptionFills(buffer, uuidToRow, damNorm, hostCfg, !!overwrite)).captionByValue;
     }
 
-    const { buf, changes, unmatched, pagesFixed, styleConflicts } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue, captionByValue, overwriteCaptions: !!overwrite });
+    const { buf, changes, unmatched, pagesFixed, styleConflicts } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue, captionByValue, overwriteCaptions: !!overwrite, styleSelections });
     lcSessions.set(sessionId, buf);   // keep session, chained on the fixed result (enables per-category iteration + re-scan)
 
     // Persist author-supplied asset mappings into every environment's asset-map CSV (per-env host),
@@ -2940,6 +3015,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
     res.setHeader('X-Change-Count', String(changes.length));
     res.setHeader('X-Unmatched',    String(unmatched.length));
     res.setHeader('X-Style-Conflicts', String(styleConflicts.length));
+    res.setHeader('X-Style-Resolved', String(counts['single-select-style-resolution'] || 0));
     res.setHeader('X-Alt-Skipped',  String([...altSkips.values()].reduce((sum, assets) => sum + assets.size, 0)));
     res.setHeader('X-Recovered',    String(recoveredPaths.size));
     res.setHeader('X-Counts',       Buffer.from(JSON.stringify(counts)).toString('base64'));
