@@ -2287,7 +2287,9 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
       }
 
       for (const s of scanUnsupportedStyles(region, styleVocab))
-        addEx(stylesAgg, file, `${s.node} [${s.block}] ${s.prop}: ${s.unsupported.join(', ')}`);
+        addEx(stylesAgg, file, s.issue === 'undeclared-field'
+          ? `${s.node} [${s.block}] ${s.prop}: not declared in modelFields`
+          : `${s.node} [${s.block}] ${s.prop}: ${s.unsupported.join(', ')}`);
 
       const rtags = robotsMap.get(robotsPagePath(file));
       if (rtags) {
@@ -2530,8 +2532,31 @@ function styleConfigKey(attrs, vocab) {
   return null;
 }
 
-// Scan a Franklin region for *_customDynamicClass values not in the block's picklist vocabulary.
-// Returns [{ node, block, prop, unsupported:[...], value }].
+function styleFieldFindings(attrs, raw, vocab) {
+  const key = styleConfigKey(attrs, vocab);
+  const block = key || attrs.auecomponentid || attrs.model || '(unknown block)';
+  const fields = attrs.modelfields === undefined ? null : new Set(
+    attrs.modelfields.replace(/^\{String\}/, '').replace(/^\[|\]$/g, '')
+      .split(',').map(field => field.split('@')[0].trim().toLowerCase()).filter(Boolean));
+  const allowed = key ? new Set(vocab[key]) : null;
+  const findings = [];
+  for (const ln of Object.keys(attrs)) {
+    if (fields && /^(?:(?:classes|style)(?:_|$)|cq:styleids$)/.test(ln) && !fields.has(ln)) {
+      findings.push({ block, prop: raw[ln], issue: 'undeclared-field', value: attrs[ln] });
+      continue;
+    }
+    if (!allowed || !/_customdynamicclass$/.test(ln)) continue;
+    const tokens = attrs[ln].split(',').map(t => t.trim()).filter(Boolean);
+    const unsupported = tokens.filter(t => !allowed.has(t));
+    if (unsupported.length) findings.push({
+      block, prop: raw[ln], issue: 'unsupported-class', value: attrs[ln], unsupported,
+      replacementValue: tokens.filter(t => allowed.has(t)).join(','),
+    });
+  }
+  return findings;
+}
+
+// Scan for undeclared style fields and non-picklist dynamic classes.
 function scanUnsupportedStyles(xml, vocab) {
   const out = [];
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)\s*\/?>/g;
@@ -2539,18 +2564,12 @@ function scanUnsupportedStyles(xml, vocab) {
   while ((m = elRe.exec(xml))) {
     const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
     while ((a = aRe.exec(m[2]))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
-    const key = styleConfigKey(attrs, vocab); if (!key) continue;
-    const allowed = new Set(vocab[key]);
-    for (const ln in attrs) {
-      if (!/_customdynamicclass$/.test(ln)) continue;
-      const bad = attrs[ln].split(',').map(t => t.trim()).filter(Boolean).filter(t => !allowed.has(t));
-      if (bad.length) out.push({ node: m[1], block: key, prop: raw[ln], unsupported: bad, value: attrs[ln] });
-    }
+    for (const finding of styleFieldFindings(attrs, raw, vocab)) out.push({ node: m[1], ...finding });
   }
   return out;
 }
 
-// Fix: drop unsupported dynamic classes, leaving free-form classes unchanged.
+// Fix: remove undeclared style fields and drop unsupported dynamic classes.
 function qaFixUnsupportedStyles(xml, vocab) {
   const changes = [];
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
@@ -2558,22 +2577,19 @@ function qaFixUnsupportedStyles(xml, vocab) {
   const result = xml.replace(elRe, (full, node, attrStr, tail) => {
     const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
     while ((a = aRe.exec(attrStr))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
-    const key = styleConfigKey(attrs, vocab); if (!key) return full;
-    const allowed = new Set(vocab[key]);
-    let out = attrStr, changed = false;
-    for (const ln of Object.keys(attrs)) {
-      if (!/_customdynamicclass$/.test(ln)) continue;
-      const dynName = raw[ln];
-      const tokens = attrs[ln].split(',').map(t => t.trim()).filter(Boolean);
-      const unsupported = tokens.filter(t => !allowed.has(t));
-      if (!unsupported.length) continue;
-      const supported  = tokens.filter(t => allowed.has(t));
-      const value = supported.join(',');
-      out = out.replace(new RegExp('(\\s' + escRe(dynName) + '=")[^"]*(")'), (_, pre, post) => pre + xmlAttrEscape(value) + post);
-      changes.push({ node, block: key, prop: dynName, removed: unsupported, value });
-      changed = true;
+    const findings = styleFieldFindings(attrs, raw, vocab);
+    let out = attrStr;
+    for (const finding of findings) {
+      if (finding.issue === 'undeclared-field') {
+        out = out.replace(new RegExp('\\s+' + escRe(finding.prop) + '="[^"]*"'), '');
+        changes.push({ node, block: finding.block, prop: finding.prop, removedField: true, oldValue: finding.value });
+      } else {
+        const value = finding.replacementValue;
+        out = out.replace(new RegExp('(\\s' + escRe(finding.prop) + '=")[^"]*(")'), (_, pre, post) => pre + xmlAttrEscape(value) + post);
+        changes.push({ node, block: finding.block, prop: finding.prop, removed: finding.unsupported, value });
+      }
     }
-    return changed ? `<${node}${out}${tail}>` : full;
+    return findings.length ? `<${node}${out}${tail}>` : full;
   });
   return { result, changes };
 }
@@ -2682,7 +2698,11 @@ async function buildQaFixedZip(buffer, opts) {
           for (const ch of al.changes) changes.push({ file, type: 'alt-text', oldUrl: ch.value, newUrl: `${ch.altProp}="${ch.alt}"` });
           for (const ch of cp.changes) changes.push({ file, type: 'caption',  oldUrl: ch.value, newUrl: `caption="${ch.caption}"` });
           for (const ch of a.changes) changes.push({ file, type: 'absolute',     ...ch });
-          for (const ch of st.changes) changes.push({ file, type: 'unsupported-style', oldUrl: `${ch.prop}: ${ch.removed.join(',')}`, newUrl: `${ch.prop}="${ch.value}" (unsupported classes removed)` });
+          for (const ch of st.changes) changes.push({
+            file, type: 'unsupported-style',
+            oldUrl: ch.removedField ? `${ch.prop}="${ch.oldValue}"` : `${ch.prop}: ${ch.removed.join(',')}`,
+            newUrl: ch.removedField ? `${ch.prop} removed (not declared in modelFields)` : `${ch.prop}="${ch.value}" (unsupported classes removed)`,
+          });
           for (const ch of rob.changes) changes.push({ file, type: 'robots-tags', oldUrl: '(missing)', newUrl: `cq:robotsTags="[${ch.value}]"` });
           for (const ch of b.changes) changes.push({ file, type: 'asset-dm',     ...ch });
           for (const ch of c.changes) changes.push({ file, type: 'short-path',   ...ch });
