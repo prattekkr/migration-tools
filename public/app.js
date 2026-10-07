@@ -1518,21 +1518,24 @@ async function lcRefreshStyleVocab() {
     const d = await res.json();
     if (!res.ok) throw new Error(d.error || 'Refresh failed');
     status.className = 'text-success small w-100 mt-1';
-    status.textContent = `✓ Style vocabulary refreshed from ${d.source}: ${d.blocks} block(s), ${d.classes} classes.`;
+    status.textContent = `✓ Style vocabulary refreshed from ${d.source}: ${d.blocks} block(s), ${d.classes} classes, ${d.groups} groups (${d.multiSelectGroups} multi-select).`;
     if (lcAnalysis) await lcScan();   // re-scan so Unsupported styles reflects the fresh vocabulary
   } catch (e) { status.className = 'text-danger small w-100 mt-1'; status.textContent = e.message; }
   finally { btn.disabled = false; btn.innerHTML = old; }
 }
 
-// Unsupported dynamic classes and style fields absent from modelFields.
+// Unsupported classes/fields and single-select conflicts requiring manual review.
 function lcRenderStyles(data) {
   const card = document.getElementById('lcStylesCard');
   const s = data.unsupportedStyles || { count: 0, examples: [] };
   if (!s.count) { card.style.display = 'none'; return; }
   card.style.display = '';
   document.getElementById('lcStylesCount').textContent = s.count;
-  document.getElementById('lcStylesBody').innerHTML = lcExamples(s.examples) ||
-    '<div class="text-muted small">—</div>';
+  const review = s.singleSelectConflicts
+    ? `<div class="alert alert-warning py-2 small">${s.singleSelectConflicts} single-select group conflict(s) require manual review. Fix preserves these selections; choose one option per group.</div>`
+    : '';
+  document.getElementById('lcStylesBody').innerHTML = review + (lcExamples(s.examples) ||
+    '<div class="text-muted small">—</div>');
 }
 
 // Pages missing a cq:robotsTags the CSV says they should have (fixable — set on jcr:content).
@@ -1759,6 +1762,7 @@ async function lcFix(checks) {
     const changes = res.headers.get('X-Change-Count');
     const unmatched = res.headers.get('X-Unmatched');
     const altSkipped = parseInt(res.headers.get('X-Alt-Skipped') || '0', 10);
+    const styleConflicts = parseInt(res.headers.get('X-Style-Conflicts') || '0', 10);
     const reportId = res.headers.get('X-Report-Id');
     const persisted = parseInt(res.headers.get('X-Custom-Persisted') || '0', 10);
     const persistEnvs = res.headers.get('X-Persist-Envs') || '';
@@ -1767,9 +1771,10 @@ async function lcFix(checks) {
     const url  = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'qa-fixed-package.zip'; a.click();
     URL.revokeObjectURL(url);
-    status.className = 'small mt-2 text-success';
+    status.className = `small mt-2 ${styleConflicts > 0 ? 'text-warning' : 'text-success'}`;
     status.textContent = `✓ Fixed ${changes} reference(s) across ${pages} page(s)${unmatched > 0 ? `, ${unmatched} unmatched (no CSV entry)` : ''}. ZIP downloaded.`
       + (altSkipped > 0 ? ` Skipped alt refresh for ${altSkipped} asset(s); existing text retained (see report).` : '')
+      + (styleConflicts > 0 ? ` ${styleConflicts} single-select style conflict(s) require manual review; selections retained (see report).` : '')
       + (recovered > 0 ? ` Recovered ${recovered} asset(s) from AEM author — synced to all env asset-maps.` : '')
       + (persisted > 0 ? ` Saved ${persisted} manual mapping(s) to the asset-map for: ${persistEnvs.replace(/,/g, ', ')} (per-env host).` : '');
     if (reportId) {

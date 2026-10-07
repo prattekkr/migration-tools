@@ -2232,6 +2232,7 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
     const a11yAgg = new Map();            // issue|node -> { node, issue, prop, count, files:Set, samples:[] }
     const styleVocab = loadStyleVocab();
     const stylesAgg = mk();               // unsupported dynamic-picklist style classes
+    let styleConflictCount = 0;
     const robotsMap = loadRobotsMap();
     const robotsAgg = mk();               // pages missing a cq:robotsTags the CSV says they should have
 
@@ -2286,10 +2287,16 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
           a.samples.push({ page: file, asset: f.asset, prop: f.prop, value: f.value });
       }
 
-      for (const s of scanUnsupportedStyles(region, styleVocab))
-        addEx(stylesAgg, file, s.issue === 'undeclared-field'
-          ? `${s.node} [${s.block}] ${s.prop}: not declared in modelFields`
-          : `${s.node} [${s.block}] ${s.prop}: ${s.unsupported.join(', ')}`);
+      for (const s of scanUnsupportedStyles(region, styleVocab)) {
+        if (s.issue === 'single-select-conflict') {
+          styleConflictCount++;
+          addEx(stylesAgg, file, `${s.node} [${s.block}] ${s.prop}: single-select group "${s.group}" has multiple selections: ${s.selected.join(', ')} (manual review)`);
+        } else {
+          addEx(stylesAgg, file, s.issue === 'undeclared-field'
+            ? `${s.node} [${s.block}] ${s.prop}: not declared in modelFields`
+            : `${s.node} [${s.block}] ${s.prop}: ${s.unsupported.join(', ')}`);
+        }
+      }
 
       const rtags = robotsMap.get(robotsPagePath(file));
       if (rtags) {
@@ -2335,7 +2342,7 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
       crossLocale: { count: crossCount, files: crossFilesSet.size, groups: crossGroupsArr, unresolved: pack(crossUnresolved) },
       unresolvedAssets: [...unresolvedAssets.values()].sort((a, b) => b.count - a.count),
       accessibility,
-      unsupportedStyles: pack(stylesAgg),
+      unsupportedStyles: { ...pack(stylesAgg), singleSelectConflicts: styleConflictCount },
       missingRobots: pack(robotsAgg),
     });
   } catch (err) {
@@ -2523,6 +2530,42 @@ function loadStyleVocab() {
   return _styleVocab;
 }
 
+function styleVocabularyClasses(block) {
+  const classes = Array.isArray(block) ? block : block?.classes;
+  if (!Array.isArray(classes)) throw new Error('Invalid style vocabulary: expected a classes array.');
+  return classes;
+}
+
+function buildStyleBlockVocabulary(content, blockName) {
+  if (!content || typeof content !== 'object' || Array.isArray(content))
+    throw new Error(`Invalid picklist content for ${blockName}.`);
+  const groups = new Map();
+  const classes = new Set();
+  for (const row of Object.values(content)) {
+    if (!row || typeof row !== 'object' || !row['Style Class']) continue;
+    const value = String(row['Style Class']).trim();
+    if (!value) continue;
+    const styleName = String(row['Style Name'] || '').trim();
+    if (!styleName) throw new Error(`Missing Style Name for ${blockName}: ${value}.`);
+    const separator = styleName.indexOf(':');
+    const name = separator < 0 ? '(ungrouped)' : styleName.slice(0, separator).trim();
+    const label = separator < 0 ? styleName : styleName.slice(separator + 1).trim();
+    if (!name || !label) throw new Error(`Invalid Style Name for ${blockName}: ${styleName}.`);
+    const flag = row['Select Multiple'];
+    const normalizedFlag = flag == null ? '' : String(flag).trim().toLowerCase();
+    if (!['', 'true', 'false'].includes(normalizedFlag))
+      throw new Error(`Invalid Select Multiple for ${blockName}: ${styleName}.`);
+    const selectMultiple = normalizedFlag === 'true';
+    if (!groups.has(name)) groups.set(name, { name, selectMultiple: false, options: [] });
+    const group = groups.get(name);
+    group.selectMultiple ||= selectMultiple;
+    group.options.push({ label, value, selectMultiple });
+    classes.add(value);
+  }
+  if (!classes.size) throw new Error(`No Style Class rows found for ${blockName}.`);
+  return { classes: [...classes].sort(), groups: [...groups.values()] };
+}
+
 // Map a block node's aueComponentId/model to its picklist-config key (e.g. custom-image→image,
 // custom-title→title, text-container→text; exact match wins so grid-container stays grid-container).
 function styleConfigKey(attrs, vocab) {
@@ -2538,7 +2581,7 @@ function styleFieldFindings(attrs, raw, vocab) {
   const fields = attrs.modelfields === undefined ? null : new Set(
     attrs.modelfields.replace(/^\{String\}/, '').replace(/^\[|\]$/g, '')
       .split(',').map(field => field.split('@')[0].trim().toLowerCase()).filter(Boolean));
-  const allowed = key ? new Set(vocab[key]) : null;
+  const allowed = key ? new Set(styleVocabularyClasses(vocab[key])) : null;
   const findings = [];
   for (const ln of Object.keys(attrs)) {
     if (fields && /^(?:(?:classes|style)(?:_|$)|cq:styleids$)/.test(ln) && !fields.has(ln)) {
@@ -2552,11 +2595,21 @@ function styleFieldFindings(attrs, raw, vocab) {
       block, prop: raw[ln], issue: 'unsupported-class', value: attrs[ln], unsupported,
       replacementValue: tokens.filter(t => allowed.has(t)).join(','),
     });
+    const groups = Array.isArray(vocab[key]) ? [] : (vocab[key].groups || []);
+    for (const group of groups) {
+      if (group.selectMultiple !== false || group.name === '(ungrouped)') continue;
+      const options = new Set(group.options.map(option => option.value));
+      const selected = [...new Set(tokens.filter(token => options.has(token)))];
+      if (selected.length > 1) findings.push({
+        block, prop: raw[ln], issue: 'single-select-conflict', value: attrs[ln],
+        group: group.name, selected,
+      });
+    }
   }
   return findings;
 }
 
-// Scan for undeclared style fields and non-picklist dynamic classes.
+// Scan for undeclared fields, non-picklist classes and single-select conflicts.
 function scanUnsupportedStyles(xml, vocab) {
   const out = [];
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)\s*\/?>/g;
@@ -2571,7 +2624,7 @@ function scanUnsupportedStyles(xml, vocab) {
 
 // Fix: remove undeclared style fields and drop unsupported dynamic classes.
 function qaFixUnsupportedStyles(xml, vocab) {
-  const changes = [];
+  const changes = [], conflicts = [];
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
   const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const result = xml.replace(elRe, (full, node, attrStr, tail) => {
@@ -2580,7 +2633,9 @@ function qaFixUnsupportedStyles(xml, vocab) {
     const findings = styleFieldFindings(attrs, raw, vocab);
     let out = attrStr;
     for (const finding of findings) {
-      if (finding.issue === 'undeclared-field') {
+      if (finding.issue === 'single-select-conflict') {
+        conflicts.push({ node, ...finding });
+      } else if (finding.issue === 'undeclared-field') {
         out = out.replace(new RegExp('\\s+' + escRe(finding.prop) + '="[^"]*"'), '');
         changes.push({ node, block: finding.block, prop: finding.prop, removedField: true, oldValue: finding.value });
       } else {
@@ -2591,7 +2646,7 @@ function qaFixUnsupportedStyles(xml, vocab) {
     }
     return findings.length ? `<${node}${out}${tail}>` : full;
   });
-  return { result, changes };
+  return { result, changes, conflicts };
 }
 
 // ── Missing robots tags ────────────────────────────────────────────────────────
@@ -2668,7 +2723,7 @@ async function buildQaFixedZip(buffer, opts) {
   const customMap  = new Map((opts.customAssetMappings || []).filter(m => m && m.from && m.to).map(m => [m.from, m.to]));
   const outerAdm   = new AdmZip(buffer);
   const innerEntry = outerAdm.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
-  const changes = [], unmatched = [];
+  const changes = [], unmatched = [], styleConflicts = [];
   let pagesFixed = 0;
 
   async function patch(adm) {
@@ -2691,7 +2746,7 @@ async function buildQaFixedZip(buffer, opts) {
           const c = qaPage && sel.has('shortPath') ? qaFixShortPaths(body, siteRoot) : { result: body, changes: [] }; body = c.result;
           const pageLocale = qaLocaleRootOf(file, siteRoot);
           const x = (qaPage && sel.has('crossLocale') && crossLocaleMappings?.length) ? qaFixCrossLocale(body, crossLocaleMappings, pageLocale) : { result: body, changes: [] }; body = x.result;
-          const st = qaPage && doStyles ? qaFixUnsupportedStyles(body, styleVocab) : { result: body, changes: [] }; body = st.result;
+          const st = qaPage && doStyles ? qaFixUnsupportedStyles(body, styleVocab) : { result: body, changes: [], conflicts: [] }; body = st.result;
           body = unmaskProtected(body, protectedVals);   // restore cq:template/tags/MSM refs before writing back
           const rob = qaPage && doRobots ? qaFixRobotsTags(pre + body + post, robotsPagePath(file), robotsMap) : { result: pre + body + post, changes: [] };
           const after = qaPage ? sanitizeXmlEntities(normalizeDeliveryUrls(rob.result)) : rob.result;
@@ -2703,6 +2758,7 @@ async function buildQaFixedZip(buffer, opts) {
             oldUrl: ch.removedField ? `${ch.prop}="${ch.oldValue}"` : `${ch.prop}: ${ch.removed.join(',')}`,
             newUrl: ch.removedField ? `${ch.prop} removed (not declared in modelFields)` : `${ch.prop}="${ch.value}" (unsupported classes removed)`,
           });
+          for (const conflict of st.conflicts) styleConflicts.push({ file, ...conflict });
           for (const ch of rob.changes) changes.push({ file, type: 'robots-tags', oldUrl: '(missing)', newUrl: `cq:robotsTags="[${ch.value}]"` });
           for (const ch of b.changes) changes.push({ file, type: 'asset-dm',     ...ch });
           for (const ch of c.changes) changes.push({ file, type: 'short-path',   ...ch });
@@ -2725,9 +2781,9 @@ async function buildQaFixedZip(buffer, opts) {
       if (e.isDirectory) continue;
       outerJsz.file(e.entryName, e.entryName === innerEntry.entryName ? patchedInner : e.getData());
     }
-    return { buf: await outerJsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), changes, unmatched, pagesFixed };
+    return { buf: await outerJsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), changes, unmatched, pagesFixed, styleConflicts };
   }
-  return { buf: await patch(outerAdm), changes, unmatched, pagesFixed };
+  return { buf: await patch(outerAdm), changes, unmatched, pagesFixed, styleConflicts };
 }
 
 // Pre-scan pass for the Fix flow: walks the Franklin pages (same inner/outer zip
@@ -2844,7 +2900,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
       if (host && sel.has('caption')) captionByValue = (await computeCaptionFills(buffer, uuidToRow, damNorm, hostCfg, !!overwrite)).captionByValue;
     }
 
-    const { buf, changes, unmatched, pagesFixed } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue, captionByValue, overwriteCaptions: !!overwrite });
+    const { buf, changes, unmatched, pagesFixed, styleConflicts } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue, captionByValue, overwriteCaptions: !!overwrite });
     lcSessions.set(sessionId, buf);   // keep session, chained on the fixed result (enables per-category iteration + re-scan)
 
     // Persist author-supplied asset mappings into every environment's asset-map CSV (per-env host),
@@ -2861,6 +2917,12 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
       oldUrl: c.oldUrl, newUrl: c.newUrl,
     }));
     for (const u of unmatched) reportRows.push({ file: u.file, type: 'asset-dm', status: 'unmatched (no CSV entry)', oldUrl: u.url, newUrl: '' });
+    for (const conflict of styleConflicts) reportRows.push({
+      file: conflict.file, type: 'single-select-style-conflict',
+      status: 'manual review (selections retained)',
+      oldUrl: `${conflict.node} [${conflict.block}] ${conflict.prop}: ${conflict.selected.join(',')}`,
+      newUrl: `Single-select group "${conflict.group}": choose one option`,
+    });
     for (const [reason, assets] of altSkips) for (const asset of assets)
       reportRows.push({ file: '', type: 'alt-text', status: reason, oldUrl: asset, newUrl: '' });
     const reportCsv = stringify(reportRows, { header: true, columns: [
@@ -2877,6 +2939,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
     res.setHeader('X-Pages-Fixed',  String(pagesFixed));
     res.setHeader('X-Change-Count', String(changes.length));
     res.setHeader('X-Unmatched',    String(unmatched.length));
+    res.setHeader('X-Style-Conflicts', String(styleConflicts.length));
     res.setHeader('X-Alt-Skipped',  String([...altSkips.values()].reduce((sum, assets) => sum + assets.size, 0)));
     res.setHeader('X-Recovered',    String(recoveredPaths.size));
     res.setHeader('X-Counts',       Buffer.from(JSON.stringify(counts)).toString('base64'));
@@ -3434,19 +3497,25 @@ app.post('/api/link-checker/refresh-style-vocab', express.json({ limit: '1mb' })
     const blocks = {};
     for (const node of nodes) {
       const r = await axios.get(host + cfgPath + '/' + encodeURIComponent(node) + '.infinity.json', opts);
-      if (r.status !== 200 || !r.data) continue;
-      const cc = r.data['jcr:content'] || {};
-      blocks[node.replace(/-picklist-config$/, '')] = [...new Set(
-        Object.values(cc).filter(v => v && typeof v === 'object' && v['Style Class'])
-          .map(v => String(v['Style Class']).trim()).filter(Boolean))].sort();
+      if (r.status !== 200 || !r.data)
+        return res.status(502).json({ error: `Could not read ${node} on ${host} (HTTP ${r.status}). Existing style vocabulary was not replaced.` });
+      const blockName = node.replace(/-picklist-config$/, '');
+      blocks[blockName] = buildStyleBlockVocabulary(r.data['jcr:content'], blockName);
     }
     const doc = {
-      _comment: 'Allowed dynamic-picklist Style Class values per EDS block, from <config>/*-picklist-config spreadsheets. Used by the Link Checker Unsupported Styles check. Regenerate via the Refresh button when picklists change.',
+      _comment: 'Per-block picklist classes and groups from <config>/*-picklist-config. Group names and option labels come from Style Name. Select Multiple defaults to false when absent; a group is multi-select if any option enables it, and each option retains its setting. Regenerate via Refresh style vocabulary.',
+      schemaVersion: 2,
       generatedAt: new Date().toISOString(), source: cfgPath, blocks,
     };
     fs.writeFileSync(path.join(DATA_DIR, 'style-classes.json'), JSON.stringify(doc, null, 2), 'utf8');
     _styleVocab = blocks;   // refresh the in-memory cache
-    res.json({ ok: true, blocks: Object.keys(blocks).length, classes: Object.values(blocks).reduce((s, a) => s + a.length, 0), source: cfgPath });
+    res.json({
+      ok: true, blocks: Object.keys(blocks).length,
+      classes: Object.values(blocks).reduce((s, block) => s + block.classes.length, 0),
+      groups: Object.values(blocks).reduce((s, block) => s + block.groups.length, 0),
+      multiSelectGroups: Object.values(blocks).reduce((s, block) => s + block.groups.filter(group => group.selectMultiple).length, 0),
+      source: cfgPath,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -831,7 +831,7 @@
           <button class="btn btn-outline-secondary" id="lcResetBtn" onclick="lcReset()" style="display:none">
             <i class="bi bi-x me-1"></i>Reset
           </button>
-          <button class="btn btn-outline-secondary btn-sm ms-auto" id="lcRefreshStylesBtn" onclick="lcRefreshStyleVocab()" title="Re-fetch the block style picklists from the selected environment's AEM author and update the allowed-styles vocabulary">
+          <button class="btn btn-outline-secondary btn-sm ms-auto" id="lcRefreshStylesBtn" onclick="lcRefreshStyleVocab()" title="Re-fetch the block style picklists, including groups and single-/multi-select settings, from the selected environment's AEM author">
             <i class="bi bi-arrow-repeat me-1"></i>Refresh style vocabulary
           </button>
           <div id="lcStatus" class="text-muted small w-100 mt-1"></div>
@@ -921,7 +921,7 @@
         <div class="card-header d-flex align-items-center gap-2 flex-wrap">
           <i class="bi bi-palette text-danger"></i><strong>Unsupported styles</strong>
           <span class="badge bg-danger ms-1" id="lcStylesCount">0</span>
-          <span class="text-muted small ms-1">— Fix drops non-picklist classes from <code>*_customDynamicClass</code> and removes class/style fields (<code>classes</code>, <code>classes_*</code>, <code>style</code>, <code>style_*</code>, <code>cq:styleIds</code>) absent from the node's <code>modelFields</code>. Declared free-form fields are preserved. Without <code>modelFields</code>, field removal is skipped.</span>
+          <span class="text-muted small ms-1">— Fix drops non-picklist classes from <code>*_customDynamicClass</code> and removes class/style fields (<code>classes</code>, <code>classes_*</code>, <code>style</code>, <code>style_*</code>, <code>cq:styleIds</code>) absent from the node's <code>modelFields</code>. Declared free-form fields are preserved. Without <code>modelFields</code>, field removal is skipped. Multiple choices in a single-select group are flagged for manual review, not automatically resolved.</span>
           <button class="btn btn-sm btn-outline-success ms-auto" id="lcStylesFixBtn" onclick="lcFix(['styles'])"><i class="bi bi-magic me-1"></i>Fix</button>
           <button type="button" class="btn btn-sm btn-link text-muted p-0 ms-1" title="Collapse / expand" onclick="lcToggleCard(this)"><i class="bi bi-chevron-up"></i></button>
         </div>

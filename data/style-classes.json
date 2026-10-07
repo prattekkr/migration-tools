@@ -1,645 +1,4755 @@
 {
-  "_comment": "Allowed dynamic-picklist Style Class values per EDS block, from <config>/*-picklist-config spreadsheets. Used by the Link Checker Unsupported Styles check. Regenerate via the Refresh button when picklists change.",
-  "generatedAt": "2026-09-18T08:42:37.184Z",
+  "_comment": "Per-block picklist classes and groups from <config>/*-picklist-config. Group names and option labels come from Style Name. Select Multiple defaults to false when absent; a group is multi-select if any option enables it, and each option retains its setting. Regenerate via Refresh style vocabulary.",
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-07T07:16:17.516Z",
   "source": "/content/abbvie-nextgen-eds/corporate/abbvie-com/config",
   "blocks": {
-    "image": [
-      "add-margins",
-      "align-center",
-      "align-left",
-      "align-right",
-      "circle",
-      "icon",
-      "image-default",
-      "large",
-      "logo",
-      "medium",
-      "no-top-padding",
-      "padding-bottom",
-      "padding-bottom-compact",
-      "section-padding",
-      "small",
-      "x-large",
-      "x-small",
-      "xx-large"
-    ],
-    "grid-section": [
-      "bg-0066f5",
-      "bg-071d49",
-      "bg-338700",
-      "bg-479ff8",
-      "bg-666b7a",
-      "bg-8a2ecc",
-      "bg-a6b5e0",
-      "bg-a86bde",
-      "bg-b9b4b4",
-      "bg-cf451c",
-      "bg-f1f3ff",
-      "bg-f4f4f4",
-      "bg-f7634f",
-      "bg-fafafa",
-      "bg-fafbff",
-      "bg-ffffff",
-      "content-wide",
-      "float",
-      "grid-cols-1",
-      "grid-cols-10",
-      "grid-cols-11",
-      "grid-cols-12",
-      "grid-cols-2",
-      "grid-cols-3",
-      "grid-cols-4",
-      "grid-cols-5",
-      "grid-cols-6",
-      "grid-cols-7",
-      "grid-cols-8",
-      "grid-cols-9",
-      "height-default",
-      "height-short",
-      "height-tall",
-      "height-x-tall",
-      "height-xx-tall",
-      "large-radius",
-      "medium-radius",
-      "no-padding",
-      "no-radius",
-      "order-1",
-      "order-10",
-      "order-11",
-      "order-12",
-      "order-2",
-      "order-3",
-      "order-4",
-      "order-5",
-      "order-6",
-      "order-7",
-      "order-8",
-      "order-9",
-      "padding-bottom",
-      "regular-padding",
-      "section-bottom-margin",
-      "small-padding",
-      "small-radius",
-      "static"
-    ],
-    "video": [
-      "ambient",
-      "video-default",
-      "video-full-width",
-      "video-large",
-      "video-medium",
-      "video-minimal",
-      "video-small",
-      "video-x-large",
-      "video-x-small",
-      "video-xx-large",
-      "video-xx-small",
-      "video-xxx-large",
-      "video-xxx-small"
-    ],
-    "title": [
-      "add-top-padding",
-      "align-center",
-      "align-left",
-      "align-right",
-      "book-weight",
-      "dark-theme",
-      "format-outdented",
-      "format-raised",
-      "full-width",
-      "h1-size",
-      "h2-size",
-      "h3-size",
-      "h4-size",
-      "h5-size",
-      "light-theme",
-      "medium-weight",
-      "no-top-padding",
-      "section-padding",
-      "spacing-bottom",
-      "text-align-center",
-      "text-align-left",
-      "text-align-right",
-      "width-large",
-      "width-medium",
-      "width-small",
-      "width-x-large",
-      "width-x-small",
-      "width-xx-large",
-      "width-xx-small",
-      "width-xxx-large",
-      "width-xxx-small"
-    ],
-    "carousel": [
-      "carousel-default",
-      "carousel-hide-btn-margin",
-      "carousel-minimal",
-      "carousel-show-btn-margin",
-      "carousel-vertical",
-      "dark",
-      "full-bleed",
-      "light",
-      "no-bottom-margin"
-    ],
-    "cta": [
-      "back-cta",
-      "dark-theme",
-      "default-cta",
-      "external-cta",
-      "full-width",
-      "internal-cta",
-      "light-theme",
-      "ot-sdk-show-settings",
-      "popup-agree",
-      "popup-close",
-      "popup-disagree",
-      "width-large",
-      "width-medium",
-      "width-small",
-      "width-x-large",
-      "width-x-small",
-      "width-xx-large",
-      "width-xx-small",
-      "width-xxx-large",
-      "width-xxx-small"
-    ],
-    "teaser": [
-      "dark-theme",
-      "light-font",
-      "light-theme",
-      "teaser-external-link",
-      "teaser-h2",
-      "teaser-h3",
-      "teaser-h4",
-      "teaser-h5",
-      "teaser-internal-link"
-    ],
-    "linklist": [
-      "list-carousel",
-      "list-dashboard",
-      "list-dashboard-publications",
-      "list-footer-legal",
-      "list-footer-primary",
-      "list-icons",
-      "list-standard",
-      "single-column",
-      "two-columns--no-stack",
-      "two-columns--stack"
-    ],
-    "fact-card": [
-      "dark-theme",
-      "hide-image",
-      "light-theme-no-stroke",
-      "light-theme-stroke",
-      "medium-theme",
-      "medium-theme-stroke",
-      "show-image",
-      "size-large",
-      "size-medium-horizontal",
-      "size-medium-vertical"
-    ],
-    "separator": [
-      "add-margin-separator",
-      "full-width",
-      "light-dark",
-      "light-theme",
-      "separator-divider",
-      "separator-height-1",
-      "separator-height-112",
-      "separator-height-128",
-      "separator-height-144",
-      "separator-height-16",
-      "separator-height-24",
-      "separator-height-32",
-      "separator-height-48",
-      "separator-height-64",
-      "separator-height-8",
-      "separator-height-80",
-      "separator-height-96",
-      "separator-standard",
-      "width-large",
-      "width-medium",
-      "width-small",
-      "width-x-large",
-      "width-x-small",
-      "width-xx-large",
-      "width-xx-small",
-      "width-xxx-large",
-      "width-xxx-small"
-    ],
-    "text": [
-      "align-center",
-      "align-left",
-      "align-right",
-      "anchor-link",
-      "anchor-link--multiple",
-      "dark-theme",
-      "description",
-      "full-width",
-      "light-font",
-      "light-theme",
-      "no-bottom-margin",
-      "no-top-padding",
-      "section-padding",
-      "single-column",
-      "small",
-      "spacing-bottom",
-      "standard",
-      "text-align-center",
-      "text-align-justify",
-      "text-align-left",
-      "text-align-right",
-      "text-ltr",
-      "text-rtl",
-      "two-columns",
-      "width-large",
-      "width-medium",
-      "width-small",
-      "width-x-large",
-      "width-x-small",
-      "width-xx-large",
-      "width-xx-small",
-      "width-xxx-large",
-      "width-xxx-small"
-    ],
-    "quote": [
-      "align-center",
-      "align-left",
-      "align-right",
-      "dark-theme",
-      "light-theme",
-      "light-theme-no-stroke",
-      "light-theme-stroke",
-      "medium-theme",
-      "medium-theme-stroke",
-      "quote-align-left",
-      "quote-align-right",
-      "quote-animation",
-      "quote-content-col-12",
-      "quote-content-col-4",
-      "quote-content-col-5",
-      "quote-content-col-6",
-      "quote-content-col-7",
-      "quote-content-col-8",
-      "quote-dashboard",
-      "quote-h2",
-      "quote-h3",
-      "quote-h4",
-      "quote-h5",
-      "quote-large",
-      "quote-medium-horizontal",
-      "quote-medium-vertical",
-      "quote-small",
-      "quote-standard"
-    ],
-    "dashboard-card-link-list": [
-      "dark-theme",
-      "light-theme-no-stroke",
-      "light-theme-stroke",
-      "medium-theme",
-      "medium-theme-stroke",
-      "size-large",
-      "size-medium-horizontal",
-      "size-medium-vertical"
-    ],
-    "news-feed": [
-      "dark-theme",
-      "light-theme"
-    ],
-    "accordion": [
-      "accordion-full-width",
-      "accordion-large",
-      "accordion-medium",
-      "accordion-small",
-      "accordion-x-large",
-      "accordion-x-small",
-      "accordion-xx-large",
-      "align-center",
-      "align-left",
-      "align-right",
-      "dark-theme",
-      "h2-size",
-      "h3-size",
-      "h4-size",
-      "h5-size",
-      "h6-size",
-      "light-theme",
-      "margin-bottom-0",
-      "no-top-padding",
-      "padding-bottom",
-      "section-padding",
-      "show-tabs-desktop"
-    ],
-    "eyebrow-text": [
-      "bold-font",
-      "dark-theme",
-      "divider",
-      "full-width",
-      "light-theme",
-      "mini",
-      "pretitle",
-      "regular-font",
-      "standard",
-      "width-large",
-      "width-medium",
-      "width-small",
-      "width-x-large",
-      "width-x-small",
-      "width-xx-large"
-    ],
-    "stock-ticker": [
-      "dark-theme",
-      "light-theme-no-stroke",
-      "light-theme-stroke",
-      "medium-theme",
-      "medium-theme-stroke"
-    ],
-    "hero-container": [
-      "height-default",
-      "height-short",
-      "height-tall",
-      "height-xx-tall",
-      "landing",
-      "large-radius",
-      "medium-radius",
-      "overlay-height-default",
-      "overlay-height-short",
-      "overlay-height-tall",
-      "overlay-height-xx-tall",
-      "overlay-inner-height-default",
-      "overlay-inner-height-short",
-      "overlay-inner-height-tall",
-      "overlay-inner-height-xx-tall",
-      "small-radius"
-    ],
-    "hero-container-item": [
-      "accent-blue",
-      "accent-green",
-      "ambient",
-      "blue-light",
-      "container-full-width",
-      "container-large",
-      "container-medium",
-      "container-small",
-      "container-x-large",
-      "container-x-small",
-      "container-xx-large",
-      "container-xx-small",
-      "container-xxx-large",
-      "container-xxx-small",
-      "dark",
-      "gray-medium",
-      "navy",
-      "purple"
-    ],
-    "story-card": [
-      "card-dashboard",
-      "card-hero",
-      "card-large",
-      "card-medium",
-      "card-small",
-      "dark-theme",
-      "hide-image-hide-desc",
-      "hide-image-show-desc",
-      "large-title",
-      "light-theme-no-stroke",
-      "light-theme-stroke",
-      "medium-theme",
-      "medium-theme-stroke",
-      "show-image-hide-desc",
-      "standard-title"
-    ],
-    "section": [
-      "align-center",
-      "align-left",
-      "align-right",
-      "bg-0066f5",
-      "bg-071d49",
-      "bg-338700",
-      "bg-479ff8",
-      "bg-666b7a",
-      "bg-8a2ecc",
-      "bg-a6b5e0",
-      "bg-a86bde",
-      "bg-b9b4b4",
-      "bg-cf451c",
-      "bg-f1f3ff",
-      "bg-f4f4f4",
-      "bg-f7634f",
-      "bg-fafafa",
-      "bg-fafbff",
-      "bg-ffffff",
-      "compact-padding",
-      "container-fill-right-margin",
-      "container-full-width",
-      "container-large",
-      "container-medium",
-      "container-small",
-      "container-x-large",
-      "container-x-small",
-      "container-xx-large",
-      "container-xx-small",
-      "container-xxx-large",
-      "container-xxx-small",
-      "content-regular",
-      "content-wide",
-      "float",
-      "footer-overlap",
-      "grid-full-page-4",
-      "grid-full-page-5-v1",
-      "grid-full-page-5-v2",
-      "grid-half-page-2",
-      "grid-half-page-3",
-      "height-default",
-      "height-short",
-      "height-tall",
-      "height-x-tall",
-      "height-xx-tall",
-      "homepage-overlap",
-      "large-radius",
-      "linear-gradient",
-      "margin-bottom-compact",
-      "medium-radius",
-      "mega-nav-padding",
-      "minimize-n-maximize",
-      "no-align",
-      "no-bottom-margin",
-      "no-bottom-padding",
-      "no-padding",
-      "no-radius",
-      "no-side-margin",
-      "no-top-bottom-padding",
-      "no-top-padding",
-      "none",
-      "overlap-predecessor",
-      "padding-bottom",
-      "section-bottom-margin",
-      "section-margin",
-      "section-padding",
-      "semi-transparent-layer",
-      "small-radius",
-      "static"
-    ],
-    "grid-container": [
-      "bg-0066f5",
-      "bg-071d49",
-      "bg-338700",
-      "bg-479ff8",
-      "bg-666b7a",
-      "bg-8a2ecc",
-      "bg-a6b5e0",
-      "bg-a86bde",
-      "bg-b9b4b4",
-      "bg-cf451c",
-      "bg-f1f3ff",
-      "bg-f4f4f4",
-      "bg-f7634f",
-      "bg-fafafa",
-      "bg-fafbff",
-      "bg-ffffff",
-      "container-fill-right-margin",
-      "container-full-width",
-      "container-large",
-      "container-medium",
-      "container-small",
-      "container-x-large",
-      "container-x-small",
-      "container-xx-large",
-      "container-xx-small",
-      "container-xxx-large",
-      "container-xxx-small",
-      "content-regular",
-      "content-wide",
-      "dir-ltr",
-      "dir-rtl",
-      "footer-overlap",
-      "height-default",
-      "height-short",
-      "height-tall",
-      "height-x-tall",
-      "height-xx-tall",
-      "homepage-overlap",
-      "large-radius",
-      "linear-gradient",
-      "margin-bottom-compact",
-      "medium-radius",
-      "mega-nav-padding",
-      "minimize-n-maximize",
-      "no-bottom-margin",
-      "no-bottom-padding",
-      "no-padding",
-      "no-radius",
-      "no-side-margin",
-      "no-top-bottom-padding",
-      "no-top-margin",
-      "no-top-padding",
-      "none",
-      "overlap-predecessor",
-      "padding-bottom",
-      "regular-padding",
-      "section-bottom-margin",
-      "semi-transparent-layer",
-      "small-padding",
-      "small-radius"
-    ],
-    "inner-grid": [
-      "bg-0066f5",
-      "bg-071d49",
-      "bg-338700",
-      "bg-479ff8",
-      "bg-666b7a",
-      "bg-8a2ecc",
-      "bg-a6b5e0",
-      "bg-a86bde",
-      "bg-b9b4b4",
-      "bg-cf451c",
-      "bg-f1f3ff",
-      "bg-f4f4f4",
-      "bg-f7634f",
-      "bg-fafafa",
-      "bg-fafbff",
-      "bg-ffffff",
-      "cols-1-10-1",
-      "cols-1-11",
-      "cols-1-3-7-1",
-      "cols-1-4",
-      "cols-1-5-1-4-1",
-      "cols-1-6-1-3",
-      "cols-1-6-5-1",
-      "cols-1-7-4",
-      "cols-1-9-2",
-      "cols-10-2",
-      "cols-11-1",
-      "cols-12",
-      "cols-2-1-8",
-      "cols-2-1-9",
-      "cols-2-10",
-      "cols-2-4-1-3-2",
-      "cols-2-8-2",
-      "cols-3-1-8",
-      "cols-3-3-3-3",
-      "cols-3-3-6",
-      "cols-3-6-3",
-      "cols-3-8",
-      "cols-3-8-1",
-      "cols-3-9",
-      "cols-4-1-7",
-      "cols-4-4-4",
-      "cols-4-8",
-      "cols-5-1-3-3",
-      "cols-5-1-5-1",
-      "cols-5-1-6",
-      "cols-5-2-5",
-      "cols-5-5-2",
-      "cols-5-7",
-      "cols-6-1-5",
-      "cols-6-3-3",
-      "cols-6-5-1",
-      "cols-6-6",
-      "cols-7-1-4",
-      "cols-7-5",
-      "cols-8-1-3",
-      "cols-8-4",
-      "cols-9-2-1",
-      "cols-9-3",
-      "compact-padding",
-      "dir-ltr",
-      "dir-rtl",
-      "full-width",
-      "height-default",
-      "height-short",
-      "height-tall",
-      "height-x-tall",
-      "height-xx-tall",
-      "large-radius",
-      "linear-gradient",
-      "margin-bottom-compact",
-      "medium-radius",
-      "mega-nav-padding",
-      "mobile-reverse",
-      "no-bottom-margin",
-      "no-bottom-padding",
-      "no-padding",
-      "no-radius",
-      "no-side-margin",
-      "no-top-bottom-padding",
-      "no-top-padding",
-      "none",
-      "padding-bottom",
-      "regular-padding",
-      "section-bottom-margin",
-      "semi-transparent-layer",
-      "small-padding",
-      "small-radius",
-      "width-large",
-      "width-medium",
-      "width-small",
-      "width-x-large",
-      "width-x-small",
-      "width-xx-large",
-      "width-xx-small",
-      "width-xxx-large",
-      "width-xxx-small"
-    ]
+    "image": {
+      "classes": [
+        "add-margins",
+        "align-center",
+        "align-left",
+        "align-right",
+        "circle",
+        "icon",
+        "image-default",
+        "large",
+        "logo",
+        "medium",
+        "no-top-padding",
+        "padding-bottom",
+        "padding-bottom-compact",
+        "section-padding",
+        "small",
+        "x-large",
+        "x-small",
+        "xx-large"
+      ],
+      "groups": [
+        {
+          "name": "Display",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Circle",
+              "value": "circle",
+              "selectMultiple": false
+            },
+            {
+              "label": "Icon",
+              "value": "icon",
+              "selectMultiple": false
+            },
+            {
+              "label": "Logo",
+              "value": "logo",
+              "selectMultiple": false
+            },
+            {
+              "label": "Default",
+              "value": "image-default",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Margin",
+          "selectMultiple": true,
+          "options": [
+            {
+              "label": "Add Margin",
+              "value": "add-margins",
+              "selectMultiple": true
+            }
+          ]
+        },
+        {
+          "name": "Variation",
+          "selectMultiple": true,
+          "options": [
+            {
+              "label": "Caption with margin",
+              "value": "image-default",
+              "selectMultiple": true
+            }
+          ]
+        },
+        {
+          "name": "Padding",
+          "selectMultiple": true,
+          "options": [
+            {
+              "label": "Padding bottom Compact",
+              "value": "padding-bottom-compact",
+              "selectMultiple": true
+            },
+            {
+              "label": "Padding Bottom",
+              "value": "padding-bottom",
+              "selectMultiple": true
+            },
+            {
+              "label": "Default Padding",
+              "value": "section-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Top Padding",
+              "value": "no-top-padding",
+              "selectMultiple": true
+            }
+          ]
+        },
+        {
+          "name": "Container Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "X-Small",
+              "value": "x-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small",
+              "value": "small",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium",
+              "value": "medium",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large",
+              "value": "large",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Large",
+              "value": "x-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Large",
+              "value": "xx-large",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Alignment",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Align Left",
+              "value": "align-left",
+              "selectMultiple": false
+            },
+            {
+              "label": "Align Center",
+              "value": "align-center",
+              "selectMultiple": false
+            },
+            {
+              "label": "Align Right",
+              "value": "align-right",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "grid-section": {
+      "classes": [
+        "allow-overflow",
+        "bg-0066f5",
+        "bg-071d49",
+        "bg-338700",
+        "bg-479ff8",
+        "bg-666b7a",
+        "bg-8a2ecc",
+        "bg-a6b5e0",
+        "bg-a86bde",
+        "bg-b9b4b4",
+        "bg-cf451c",
+        "bg-f1f3ff",
+        "bg-f4f4f4",
+        "bg-f7634f",
+        "bg-fafafa",
+        "bg-fafbff",
+        "bg-ffffff",
+        "content-wide",
+        "float",
+        "grid-cols-1",
+        "grid-cols-10",
+        "grid-cols-11",
+        "grid-cols-12",
+        "grid-cols-2",
+        "grid-cols-3",
+        "grid-cols-4",
+        "grid-cols-5",
+        "grid-cols-6",
+        "grid-cols-7",
+        "grid-cols-8",
+        "grid-cols-9",
+        "height-default",
+        "height-short",
+        "height-tall",
+        "height-x-tall",
+        "height-xx-tall",
+        "large-radius",
+        "medium-radius",
+        "no-padding",
+        "no-radius",
+        "order-1",
+        "order-10",
+        "order-11",
+        "order-12",
+        "order-2",
+        "order-3",
+        "order-4",
+        "order-5",
+        "order-6",
+        "order-7",
+        "order-8",
+        "order-9",
+        "padding-bottom",
+        "padding-bottom-compact",
+        "regular-padding",
+        "section-bottom-margin",
+        "small-padding",
+        "small-radius",
+        "static"
+      ],
+      "groups": [
+        {
+          "name": "Grid Columns",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "1 Column",
+              "value": "grid-cols-1",
+              "selectMultiple": false
+            },
+            {
+              "label": "2 Columns",
+              "value": "grid-cols-2",
+              "selectMultiple": false
+            },
+            {
+              "label": "3 Columns",
+              "value": "grid-cols-3",
+              "selectMultiple": false
+            },
+            {
+              "label": "4 Columns",
+              "value": "grid-cols-4",
+              "selectMultiple": false
+            },
+            {
+              "label": "5 Columns",
+              "value": "grid-cols-5",
+              "selectMultiple": false
+            },
+            {
+              "label": "6 Columns",
+              "value": "grid-cols-6",
+              "selectMultiple": false
+            },
+            {
+              "label": "7 Columns",
+              "value": "grid-cols-7",
+              "selectMultiple": false
+            },
+            {
+              "label": "8 Columns",
+              "value": "grid-cols-8",
+              "selectMultiple": false
+            },
+            {
+              "label": "9 Columns",
+              "value": "grid-cols-9",
+              "selectMultiple": false
+            },
+            {
+              "label": "10 Columns",
+              "value": "grid-cols-10",
+              "selectMultiple": false
+            },
+            {
+              "label": "11 Columns",
+              "value": "grid-cols-11",
+              "selectMultiple": false
+            },
+            {
+              "label": "12 Columns",
+              "value": "grid-cols-12",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Mobile Order",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Default",
+              "value": "content-wide",
+              "selectMultiple": false
+            },
+            {
+              "label": "1",
+              "value": "order-1",
+              "selectMultiple": false
+            },
+            {
+              "label": "2",
+              "value": "order-2",
+              "selectMultiple": false
+            },
+            {
+              "label": "3",
+              "value": "order-3",
+              "selectMultiple": false
+            },
+            {
+              "label": "4",
+              "value": "order-4",
+              "selectMultiple": false
+            },
+            {
+              "label": "5",
+              "value": "order-5",
+              "selectMultiple": false
+            },
+            {
+              "label": "6",
+              "value": "order-6",
+              "selectMultiple": false
+            },
+            {
+              "label": "7",
+              "value": "order-7",
+              "selectMultiple": false
+            },
+            {
+              "label": "8",
+              "value": "order-8",
+              "selectMultiple": false
+            },
+            {
+              "label": "9",
+              "value": "order-9",
+              "selectMultiple": false
+            },
+            {
+              "label": "10",
+              "value": "order-10",
+              "selectMultiple": false
+            },
+            {
+              "label": "11",
+              "value": "order-11",
+              "selectMultiple": false
+            },
+            {
+              "label": "12",
+              "value": "order-12",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Background Color",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "White",
+              "value": "bg-ffffff",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark Navy Blue",
+              "value": "bg-071d49",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Periwinkle Blue",
+              "value": "bg-a6b5e0",
+              "selectMultiple": false
+            },
+            {
+              "label": "Very Light Lavender",
+              "value": "bg-f1f3ff",
+              "selectMultiple": false
+            },
+            {
+              "label": "Soft Off White",
+              "value": "bg-fafbff",
+              "selectMultiple": false
+            },
+            {
+              "label": "Slate Gray",
+              "value": "bg-666b7a",
+              "selectMultiple": false
+            },
+            {
+              "label": "Warm Gray",
+              "value": "bg-b9b4b4",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Gray",
+              "value": "bg-f4f4f4",
+              "selectMultiple": false
+            },
+            {
+              "label": "Snow White",
+              "value": "bg-fafafa",
+              "selectMultiple": false
+            },
+            {
+              "label": "Royal Purple",
+              "value": "bg-8a2ecc",
+              "selectMultiple": false
+            },
+            {
+              "label": "Soft Purple",
+              "value": "bg-a86bde",
+              "selectMultiple": false
+            },
+            {
+              "label": "Bright Blue",
+              "value": "bg-0066f5",
+              "selectMultiple": false
+            },
+            {
+              "label": "Sky Blue",
+              "value": "bg-479ff8",
+              "selectMultiple": false
+            },
+            {
+              "label": "Burnt Orange",
+              "value": "bg-cf451c",
+              "selectMultiple": false
+            },
+            {
+              "label": "Coral Red",
+              "value": "bg-f7634f",
+              "selectMultiple": false
+            },
+            {
+              "label": "Forest Green",
+              "value": "bg-338700",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Border Radius",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "None",
+              "value": "no-radius",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large Radius",
+              "value": "large-radius",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Radius",
+              "value": "medium-radius",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small Radius",
+              "value": "small-radius",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Padding",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "No Padding",
+              "value": "no-padding",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small",
+              "value": "small-padding",
+              "selectMultiple": false
+            },
+            {
+              "label": "Regular",
+              "value": "regular-padding",
+              "selectMultiple": false
+            },
+            {
+              "label": "Add Bottom Padding",
+              "value": "padding-bottom",
+              "selectMultiple": false
+            },
+            {
+              "label": "Compact Bottom Padding",
+              "value": "padding-bottom-compact",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Desktop Height",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Default",
+              "value": "height-default",
+              "selectMultiple": false
+            },
+            {
+              "label": "Short",
+              "value": "height-short",
+              "selectMultiple": false
+            },
+            {
+              "label": "Tall",
+              "value": "height-tall",
+              "selectMultiple": false
+            },
+            {
+              "label": "X Tall",
+              "value": "height-x-tall",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX Tall",
+              "value": "height-xx-tall",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Desktop Grid Behavior",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Static",
+              "value": "static",
+              "selectMultiple": false
+            },
+            {
+              "label": "Float",
+              "value": "float",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Margin",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Add Bottom Margin",
+              "value": "section-bottom-margin",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Overflow",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Allow Overflow",
+              "value": "allow-overflow",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "video": {
+      "classes": [
+        "ambient",
+        "video-default",
+        "video-full-width",
+        "video-large",
+        "video-medium",
+        "video-minimal",
+        "video-small",
+        "video-x-large",
+        "video-x-small",
+        "video-xx-large",
+        "video-xx-small",
+        "video-xxx-large",
+        "video-xxx-small"
+      ],
+      "groups": [
+        {
+          "name": "Variation",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Default",
+              "value": "video-default",
+              "selectMultiple": false
+            },
+            {
+              "label": "Minimal",
+              "value": "video-minimal",
+              "selectMultiple": false
+            },
+            {
+              "label": "Ambient",
+              "value": "ambient",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Video Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Full Width",
+              "value": "video-full-width",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX-Large",
+              "value": "video-xxx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Large",
+              "value": "video-xx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Large",
+              "value": "video-x-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large",
+              "value": "video-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium",
+              "value": "video-medium",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small",
+              "value": "video-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Small",
+              "value": "video-x-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Small",
+              "value": "video-xx-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX-Small",
+              "value": "video-xxx-small",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "title": {
+      "classes": [
+        "add-top-padding",
+        "align-center",
+        "align-left",
+        "align-right",
+        "book-weight",
+        "compact-padding",
+        "dark-theme",
+        "format-outdented",
+        "format-raised",
+        "full-width",
+        "h1-size",
+        "h2-size",
+        "h3-size",
+        "h4-size",
+        "h5-size",
+        "light-theme",
+        "medium-weight",
+        "no-top-padding",
+        "section-padding",
+        "spacing-bottom",
+        "text-align-center",
+        "text-align-left",
+        "text-align-right",
+        "width-large",
+        "width-medium",
+        "width-small",
+        "width-x-large",
+        "width-x-small",
+        "width-xx-large",
+        "width-xx-small",
+        "width-xxx-large",
+        "width-xxx-small"
+      ],
+      "groups": [
+        {
+          "name": "Title Alignment",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Left",
+              "value": "text-align-left",
+              "selectMultiple": false
+            },
+            {
+              "label": "Right",
+              "value": "text-align-right",
+              "selectMultiple": false
+            },
+            {
+              "label": "Center",
+              "value": "text-align-center",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Font Weight",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Medium",
+              "value": "medium-weight",
+              "selectMultiple": false
+            },
+            {
+              "label": "Book",
+              "value": "book-weight",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Format",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Outdented with Accent Color",
+              "value": "format-outdented",
+              "selectMultiple": false
+            },
+            {
+              "label": "Raised Cap",
+              "value": "format-raised",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light",
+              "value": "light-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark",
+              "value": "dark-theme",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Decorative Title Size",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "H1",
+              "value": "h1-size",
+              "selectMultiple": false
+            },
+            {
+              "label": "H2",
+              "value": "h2-size",
+              "selectMultiple": false
+            },
+            {
+              "label": "H3",
+              "value": "h3-size",
+              "selectMultiple": false
+            },
+            {
+              "label": "H4",
+              "value": "h4-size",
+              "selectMultiple": false
+            },
+            {
+              "label": "H5",
+              "value": "h5-size",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Title Container Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Full Width",
+              "value": "full-width",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX-Large",
+              "value": "width-xxx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Large",
+              "value": "width-xx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Large",
+              "value": "width-x-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large",
+              "value": "width-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium",
+              "value": "width-medium",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small",
+              "value": "width-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Small",
+              "value": "width-x-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Small",
+              "value": "width-xx-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX-Small",
+              "value": "width-xxx-small",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Margin",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Spacing Bottom",
+              "value": "spacing-bottom",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Padding",
+          "selectMultiple": true,
+          "options": [
+            {
+              "label": "Add Default Padding",
+              "value": "section-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Top Padding",
+              "value": "no-top-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Compact Mobile Padding",
+              "value": "compact-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Add Top Padding",
+              "value": "add-top-padding",
+              "selectMultiple": true
+            }
+          ]
+        },
+        {
+          "name": "Alignment",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Left",
+              "value": "align-left",
+              "selectMultiple": false
+            },
+            {
+              "label": "Right",
+              "value": "align-right",
+              "selectMultiple": false
+            },
+            {
+              "label": "Center",
+              "value": "align-center",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "carousel": {
+      "classes": [
+        "carousel-default",
+        "carousel-hide-btn-margin",
+        "carousel-minimal",
+        "carousel-show-btn-margin",
+        "carousel-vertical",
+        "dark",
+        "full-bleed",
+        "light",
+        "no-bottom-margin"
+      ],
+      "groups": [
+        {
+          "name": "Variant",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Default",
+              "value": "carousel-default",
+              "selectMultiple": false
+            },
+            {
+              "label": "Minimal",
+              "value": "carousel-minimal",
+              "selectMultiple": false
+            },
+            {
+              "label": "Vertical",
+              "value": "carousel-vertical",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light-Theme",
+              "value": "light",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark-Theme",
+              "value": "dark",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Bottom Margin",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Show Bottom Margin",
+              "value": "carousel-show-btn-margin",
+              "selectMultiple": false
+            },
+            {
+              "label": "Hide Bottom Margin",
+              "value": "carousel-hide-btn-margin",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Margin",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "No bottom margin",
+              "value": "no-bottom-margin",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Layout",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Full Bleed",
+              "value": "full-bleed",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "cta": {
+      "classes": [
+        "back-cta",
+        "dark-theme",
+        "default-cta",
+        "external-cta",
+        "float-left",
+        "float-right",
+        "full-width",
+        "internal-cta",
+        "light-theme",
+        "ot-sdk-show-settings",
+        "popup-agree",
+        "popup-close",
+        "popup-disagree",
+        "width-large",
+        "width-medium",
+        "width-small",
+        "width-x-large",
+        "width-x-small",
+        "width-xx-large",
+        "width-xx-small",
+        "width-xxx-large",
+        "width-xxx-small"
+      ],
+      "groups": [
+        {
+          "name": "Default",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Default",
+              "value": "default-cta",
+              "selectMultiple": false
+            },
+            {
+              "label": "Internal",
+              "value": "internal-cta",
+              "selectMultiple": false
+            },
+            {
+              "label": "External",
+              "value": "external-cta",
+              "selectMultiple": false
+            },
+            {
+              "label": "Back CTA",
+              "value": "back-cta",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Dark",
+              "value": "dark-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light",
+              "value": "light-theme",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "OneTrust Cookie Button",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "OneTrust Cookie Button style",
+              "value": "ot-sdk-show-settings",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Popup",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "PopUp Close",
+              "value": "popup-close",
+              "selectMultiple": false
+            },
+            {
+              "label": "PopUp Agree",
+              "value": "popup-agree",
+              "selectMultiple": false
+            },
+            {
+              "label": "PopUp Disagree",
+              "value": "popup-disagree",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Container Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Full Width",
+              "value": "full-width",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX-Large",
+              "value": "width-xxx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Large",
+              "value": "width-xx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Large",
+              "value": "width-x-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large",
+              "value": "width-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium",
+              "value": "width-medium",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small",
+              "value": "width-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Small",
+              "value": "width-x-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Small",
+              "value": "width-xx-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX-Small",
+              "value": "width-xxx-small",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Float",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Left",
+              "value": "float-left",
+              "selectMultiple": false
+            },
+            {
+              "label": "Right",
+              "value": "float-right",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "teaser": {
+      "classes": [
+        "dark-theme",
+        "light-font",
+        "light-theme",
+        "teaser-external-link",
+        "teaser-h2",
+        "teaser-h3",
+        "teaser-h4",
+        "teaser-h5",
+        "teaser-internal-link"
+      ],
+      "groups": [
+        {
+          "name": "Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light Theme",
+              "value": "light-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark Theme",
+              "value": "dark-theme",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Variant",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "H2 Title",
+              "value": "teaser-h2",
+              "selectMultiple": false
+            },
+            {
+              "label": "H3 Title",
+              "value": "teaser-h3",
+              "selectMultiple": false
+            },
+            {
+              "label": "H4 Title",
+              "value": "teaser-h4",
+              "selectMultiple": false
+            },
+            {
+              "label": "H5 Title",
+              "value": "teaser-h5",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "CTA Variations",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "External Link",
+              "value": "teaser-external-link",
+              "selectMultiple": false
+            },
+            {
+              "label": "Internal Link",
+              "value": "teaser-internal-link",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Description font style",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light Font",
+              "value": "light-font",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "linklist": {
+      "classes": [
+        "list-carousel",
+        "list-dashboard",
+        "list-dashboard-publications",
+        "list-footer-legal",
+        "list-footer-primary",
+        "list-icons",
+        "list-standard",
+        "single-column",
+        "two-columns--no-stack",
+        "two-columns--stack"
+      ],
+      "groups": [
+        {
+          "name": "Variant",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Standard",
+              "value": "list-standard",
+              "selectMultiple": false
+            },
+            {
+              "label": "Rows With Arrows",
+              "value": "list-dashboard",
+              "selectMultiple": false
+            },
+            {
+              "label": "Icons",
+              "value": "list-icons",
+              "selectMultiple": false
+            },
+            {
+              "label": "Footer - primary",
+              "value": "list-footer-primary",
+              "selectMultiple": false
+            },
+            {
+              "label": "Footer - legal",
+              "value": "list-footer-legal",
+              "selectMultiple": false
+            },
+            {
+              "label": "Detailed List",
+              "value": "list-dashboard-publications",
+              "selectMultiple": false
+            },
+            {
+              "label": "Carousel",
+              "value": "list-carousel",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Columns",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Single column",
+              "value": "single-column",
+              "selectMultiple": false
+            },
+            {
+              "label": "Two columns no stack on mobile",
+              "value": "two-columns--no-stack",
+              "selectMultiple": false
+            },
+            {
+              "label": "Two columns stack on mobile",
+              "value": "two-columns--stack",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "fact-card": {
+      "classes": [
+        "dark-theme",
+        "hide-image",
+        "light-theme-no-stroke",
+        "light-theme-stroke",
+        "medium-theme",
+        "medium-theme-stroke",
+        "show-image",
+        "size-large",
+        "size-medium-horizontal",
+        "size-medium-vertical"
+      ],
+      "groups": [
+        {
+          "name": "Size",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Size Medium Horizontal",
+              "value": "size-medium-horizontal",
+              "selectMultiple": false
+            },
+            {
+              "label": "Size Medium Vertical",
+              "value": "size-medium-vertical",
+              "selectMultiple": false
+            },
+            {
+              "label": "Size Large",
+              "value": "size-large",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light Theme No Stroke",
+              "value": "light-theme-no-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Theme Stroke",
+              "value": "light-theme-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Theme",
+              "value": "medium-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Theme Stroke",
+              "value": "medium-theme-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark Theme",
+              "value": "dark-theme",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Dashboard Layout",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Show Image",
+              "value": "show-image",
+              "selectMultiple": false
+            },
+            {
+              "label": "Hide Image",
+              "value": "hide-image",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "separator": {
+      "classes": [
+        "add-margin-separator",
+        "full-width",
+        "light-dark",
+        "light-theme",
+        "separator-divider",
+        "separator-height-1",
+        "separator-height-112",
+        "separator-height-128",
+        "separator-height-144",
+        "separator-height-16",
+        "separator-height-24",
+        "separator-height-32",
+        "separator-height-48",
+        "separator-height-64",
+        "separator-height-8",
+        "separator-height-80",
+        "separator-height-96",
+        "separator-standard",
+        "width-large",
+        "width-medium",
+        "width-small",
+        "width-x-large",
+        "width-x-small",
+        "width-xx-large",
+        "width-xx-small",
+        "width-xxx-large",
+        "width-xxx-small"
+      ],
+      "groups": [
+        {
+          "name": "Height",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "1px",
+              "value": "separator-height-1",
+              "selectMultiple": false
+            },
+            {
+              "label": "8px",
+              "value": "separator-height-8",
+              "selectMultiple": false
+            },
+            {
+              "label": "16px",
+              "value": "separator-height-16",
+              "selectMultiple": false
+            },
+            {
+              "label": "24px",
+              "value": "separator-height-24",
+              "selectMultiple": false
+            },
+            {
+              "label": "32px",
+              "value": "separator-height-32",
+              "selectMultiple": false
+            },
+            {
+              "label": "48px",
+              "value": "separator-height-48",
+              "selectMultiple": false
+            },
+            {
+              "label": "64px",
+              "value": "separator-height-64",
+              "selectMultiple": false
+            },
+            {
+              "label": "80px",
+              "value": "separator-height-80",
+              "selectMultiple": false
+            },
+            {
+              "label": "96px",
+              "value": "separator-height-96",
+              "selectMultiple": false
+            },
+            {
+              "label": "112px",
+              "value": "separator-height-112",
+              "selectMultiple": false
+            },
+            {
+              "label": "128px",
+              "value": "separator-height-128",
+              "selectMultiple": false
+            },
+            {
+              "label": "144px",
+              "value": "separator-height-144",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light",
+              "value": "light-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark",
+              "value": "light-dark",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Variant",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Standard",
+              "value": "separator-standard",
+              "selectMultiple": false
+            },
+            {
+              "label": "Divider",
+              "value": "separator-divider",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Utility",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Add Margin",
+              "value": "add-margin-separator",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Container Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Full Width",
+              "value": "full-width",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX-Large",
+              "value": "width-xxx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Large",
+              "value": "width-xx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Large",
+              "value": "width-x-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large",
+              "value": "width-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium",
+              "value": "width-medium",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small",
+              "value": "width-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Small",
+              "value": "width-x-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Small",
+              "value": "width-xx-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX-Small",
+              "value": "width-xxx-small",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "text": {
+      "classes": [
+        "align-center",
+        "align-left",
+        "align-right",
+        "anchor-link",
+        "anchor-link--multiple",
+        "compact-padding",
+        "dark-theme",
+        "description",
+        "full-width",
+        "light-font",
+        "light-theme",
+        "no-bottom-margin",
+        "no-top-padding",
+        "padding-bottom-compact",
+        "section-padding",
+        "single-column",
+        "small",
+        "spacing-bottom",
+        "standard",
+        "text-align-center",
+        "text-align-justify",
+        "text-align-left",
+        "text-align-right",
+        "text-ltr",
+        "text-rtl",
+        "two-columns",
+        "width-large",
+        "width-medium",
+        "width-small",
+        "width-x-large",
+        "width-x-small",
+        "width-xx-large",
+        "width-xx-small",
+        "width-xxx-large",
+        "width-xxx-small"
+      ],
+      "groups": [
+        {
+          "name": "Text Container Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Full Width",
+              "value": "full-width",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX-Large",
+              "value": "width-xxx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Large",
+              "value": "width-xx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Large",
+              "value": "width-x-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large",
+              "value": "width-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium",
+              "value": "width-medium",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small",
+              "value": "width-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Small",
+              "value": "width-x-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Small",
+              "value": "width-xx-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX-Small",
+              "value": "width-xxx-small",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Text Alignment",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Left",
+              "value": "text-align-left",
+              "selectMultiple": false
+            },
+            {
+              "label": "Center",
+              "value": "text-align-center",
+              "selectMultiple": false
+            },
+            {
+              "label": "Right",
+              "value": "text-align-right",
+              "selectMultiple": false
+            },
+            {
+              "label": "Justify",
+              "value": "text-align-justify",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Text Direction",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Left to Right",
+              "value": "text-ltr",
+              "selectMultiple": false
+            },
+            {
+              "label": "Right to Left",
+              "value": "text-rtl",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light",
+              "value": "light-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark",
+              "value": "dark-theme",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Text Columns",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Single Column",
+              "value": "single-column",
+              "selectMultiple": false
+            },
+            {
+              "label": "Two Column",
+              "value": "two-columns",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Variant",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Small",
+              "value": "small",
+              "selectMultiple": false
+            },
+            {
+              "label": "Standard",
+              "value": "standard",
+              "selectMultiple": false
+            },
+            {
+              "label": "Description",
+              "value": "description",
+              "selectMultiple": false
+            },
+            {
+              "label": "Anchor Link",
+              "value": "anchor-link",
+              "selectMultiple": false
+            },
+            {
+              "label": "Multiple Anchor Links",
+              "value": "anchor-link--multiple",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Margin",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Spacing Bottom",
+              "value": "spacing-bottom",
+              "selectMultiple": false
+            },
+            {
+              "label": "No bottom margin",
+              "value": "no-bottom-margin",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Padding",
+          "selectMultiple": true,
+          "options": [
+            {
+              "label": "Add Default Padding",
+              "value": "section-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Top Padding",
+              "value": "no-top-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Compact Mobile Padding",
+              "value": "compact-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Compact Bottom Padding",
+              "value": "padding-bottom-compact",
+              "selectMultiple": true
+            }
+          ]
+        },
+        {
+          "name": "Font",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light",
+              "value": "light-font",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Alignment",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Left",
+              "value": "align-left",
+              "selectMultiple": false
+            },
+            {
+              "label": "Right",
+              "value": "align-right",
+              "selectMultiple": false
+            },
+            {
+              "label": "Center",
+              "value": "align-center",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "quote": {
+      "classes": [
+        "align-center",
+        "align-left",
+        "align-right",
+        "dark-theme",
+        "light-theme",
+        "light-theme-no-stroke",
+        "light-theme-stroke",
+        "medium-theme",
+        "medium-theme-stroke",
+        "quote-align-left",
+        "quote-align-right",
+        "quote-animation",
+        "quote-content-col-12",
+        "quote-content-col-4",
+        "quote-content-col-5",
+        "quote-content-col-6",
+        "quote-content-col-7",
+        "quote-content-col-8",
+        "quote-dashboard",
+        "quote-h2",
+        "quote-h3",
+        "quote-h4",
+        "quote-h5",
+        "quote-large",
+        "quote-medium-horizontal",
+        "quote-medium-vertical",
+        "quote-small",
+        "quote-standard"
+      ],
+      "groups": [
+        {
+          "name": "Variation",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Standard",
+              "value": "quote-standard",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dashboard",
+              "value": "quote-dashboard",
+              "selectMultiple": false
+            },
+            {
+              "label": "Animation",
+              "value": "quote-animation",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Standard - Desktop Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "XX-Large (12 column)",
+              "value": "quote-content-col-12",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Large (8 column)",
+              "value": "quote-content-col-8",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large (7 column)",
+              "value": "quote-content-col-7",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium (6 column)",
+              "value": "quote-content-col-6",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small (5 column)",
+              "value": "quote-content-col-5",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Small (4 column)",
+              "value": "quote-content-col-4",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Standard - Alignment",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Align Left",
+              "value": "align-left",
+              "selectMultiple": false
+            },
+            {
+              "label": "Align Center",
+              "value": "align-center",
+              "selectMultiple": false
+            },
+            {
+              "label": "Align Right",
+              "value": "align-right",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Standard - Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light Theme",
+              "value": "light-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark Theme",
+              "value": "dark-theme",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Standard - Quote Size",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "H2",
+              "value": "quote-h2",
+              "selectMultiple": false
+            },
+            {
+              "label": "H3",
+              "value": "quote-h3",
+              "selectMultiple": false
+            },
+            {
+              "label": "H4",
+              "value": "quote-h4",
+              "selectMultiple": false
+            },
+            {
+              "label": "H5",
+              "value": "quote-h5",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Dashboard - Size",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Small",
+              "value": "quote-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Horizontal",
+              "value": "quote-medium-horizontal",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Vertical",
+              "value": "quote-medium-vertical",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large",
+              "value": "quote-large",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Dashboard - Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light Theme Without Stroke",
+              "value": "light-theme-no-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Theme With Stroke",
+              "value": "light-theme-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Theme Without Stroke",
+              "value": "medium-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Theme With Stroke",
+              "value": "medium-theme-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark Theme",
+              "value": "dark-theme",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Quote Alignment",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Quote align left",
+              "value": "quote-align-left",
+              "selectMultiple": false
+            },
+            {
+              "label": "Quote align right",
+              "value": "quote-align-right",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "dashboard-card-link-list": {
+      "classes": [
+        "dark-theme",
+        "light-theme-no-stroke",
+        "light-theme-stroke",
+        "medium-theme",
+        "medium-theme-stroke",
+        "size-large",
+        "size-medium-horizontal",
+        "size-medium-vertical"
+      ],
+      "groups": [
+        {
+          "name": "Size",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Size Medium Horizontal",
+              "value": "size-medium-horizontal",
+              "selectMultiple": false
+            },
+            {
+              "label": "Size Medium Vertical",
+              "value": "size-medium-vertical",
+              "selectMultiple": false
+            },
+            {
+              "label": "Size Large",
+              "value": "size-large",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light Theme No Stroke",
+              "value": "light-theme-no-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Theme Stroke",
+              "value": "light-theme-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Theme",
+              "value": "medium-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Theme Stroke",
+              "value": "medium-theme-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark Theme",
+              "value": "dark-theme",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "news-feed": {
+      "classes": [
+        "dark-theme",
+        "light-theme"
+      ],
+      "groups": [
+        {
+          "name": "Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Dark Theme",
+              "value": "dark-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Theme",
+              "value": "light-theme",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "accordion": {
+      "classes": [
+        "accordion-full-width",
+        "accordion-large",
+        "accordion-medium",
+        "accordion-small",
+        "accordion-x-large",
+        "accordion-x-small",
+        "accordion-xx-large",
+        "align-center",
+        "align-left",
+        "align-right",
+        "dark-theme",
+        "h2-size",
+        "h3-size",
+        "h4-size",
+        "h5-size",
+        "h6-size",
+        "light-theme",
+        "margin-bottom-0",
+        "no-top-padding",
+        "padding-bottom",
+        "section-padding",
+        "show-tabs-desktop"
+      ],
+      "groups": [
+        {
+          "name": "Alignment",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Align Left",
+              "value": "align-left",
+              "selectMultiple": false
+            },
+            {
+              "label": "Align Center",
+              "value": "align-center",
+              "selectMultiple": false
+            },
+            {
+              "label": "Align Right",
+              "value": "align-right",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light Theme",
+              "value": "light-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark Theme",
+              "value": "dark-theme",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Padding",
+          "selectMultiple": true,
+          "options": [
+            {
+              "label": "Section-Padding",
+              "value": "section-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Add Bottom Padding",
+              "value": "padding-bottom",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Top Padding",
+              "value": "no-top-padding",
+              "selectMultiple": true
+            }
+          ]
+        },
+        {
+          "name": "Margin",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "No bottom margin",
+              "value": "margin-bottom-0",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Decorative Title Size - Desktop",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "H2",
+              "value": "h2-size",
+              "selectMultiple": false
+            },
+            {
+              "label": "H3",
+              "value": "h3-size",
+              "selectMultiple": false
+            },
+            {
+              "label": "H4",
+              "value": "h4-size",
+              "selectMultiple": false
+            },
+            {
+              "label": "H5",
+              "value": "h5-size",
+              "selectMultiple": false
+            },
+            {
+              "label": "H6",
+              "value": "h6-size",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Utility Nav Options",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Show tabs on desktop",
+              "value": "show-tabs-desktop",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Desktop Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Full Width",
+              "value": "accordion-full-width",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Large",
+              "value": "accordion-xx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Large",
+              "value": "accordion-x-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large",
+              "value": "accordion-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium",
+              "value": "accordion-medium",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small",
+              "value": "accordion-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Small",
+              "value": "accordion-x-small",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "eyebrow-text": {
+      "classes": [
+        "bold-font",
+        "dark-theme",
+        "divider",
+        "full-width",
+        "light-theme",
+        "mini",
+        "pretitle",
+        "regular-font",
+        "standard",
+        "width-large",
+        "width-medium",
+        "width-small",
+        "width-x-large",
+        "width-x-small",
+        "width-xx-large"
+      ],
+      "groups": [
+        {
+          "name": "Variation",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Mini",
+              "value": "mini",
+              "selectMultiple": false
+            },
+            {
+              "label": "Standard",
+              "value": "standard",
+              "selectMultiple": false
+            },
+            {
+              "label": "Standard With Divider",
+              "value": "divider",
+              "selectMultiple": false
+            },
+            {
+              "label": "Pretitle",
+              "value": "pretitle",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light Theme",
+              "value": "light-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark Theme",
+              "value": "dark-theme",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Font Weight",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Bold",
+              "value": "bold-font",
+              "selectMultiple": false
+            },
+            {
+              "label": "Regular",
+              "value": "regular-font",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Text Container Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Full Width",
+              "value": "full-width",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Large Width",
+              "value": "width-xx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Large Width",
+              "value": "width-x-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large Width",
+              "value": "width-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Width",
+              "value": "width-medium",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small Width",
+              "value": "width-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Small Width",
+              "value": "width-x-small",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "stock-ticker": {
+      "classes": [
+        "dark-theme",
+        "light-theme-no-stroke",
+        "light-theme-stroke",
+        "medium-theme",
+        "medium-theme-stroke"
+      ],
+      "groups": [
+        {
+          "name": "Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light Theme No Stroke",
+              "value": "light-theme-no-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Theme Stroke",
+              "value": "light-theme-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Theme No Stroke",
+              "value": "medium-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Theme Stroke",
+              "value": "medium-theme-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark Theme",
+              "value": "dark-theme",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "hero-container": {
+      "classes": [
+        "height-default",
+        "height-short",
+        "height-tall",
+        "height-xx-tall",
+        "landing",
+        "large-radius",
+        "medium-radius",
+        "overlay-height-default",
+        "overlay-height-short",
+        "overlay-height-tall",
+        "overlay-height-xx-tall",
+        "overlay-inner-height-default",
+        "overlay-inner-height-short",
+        "overlay-inner-height-tall",
+        "overlay-inner-height-xx-tall",
+        "small-radius"
+      ],
+      "groups": [
+        {
+          "name": "Height",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Landing (full-bleed, extra tall + bottom padding)",
+              "value": "landing",
+              "selectMultiple": false
+            },
+            {
+              "label": "Short",
+              "value": "height-short",
+              "selectMultiple": false
+            },
+            {
+              "label": "Default",
+              "value": "height-default",
+              "selectMultiple": false
+            },
+            {
+              "label": "Tall",
+              "value": "height-tall",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Tall",
+              "value": "height-xx-tall",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Overlay Height",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Short",
+              "value": "overlay-height-short",
+              "selectMultiple": false
+            },
+            {
+              "label": "Default Height",
+              "value": "overlay-height-default",
+              "selectMultiple": false
+            },
+            {
+              "label": "Tall",
+              "value": "overlay-height-tall",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Tall",
+              "value": "overlay-height-xx-tall",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Overlay Border Radius",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Large Radius",
+              "value": "large-radius",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Radius",
+              "value": "medium-radius",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small Radius",
+              "value": "small-radius",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Overlay Height Inner",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Short",
+              "value": "overlay-inner-height-short",
+              "selectMultiple": false
+            },
+            {
+              "label": "Default Height",
+              "value": "overlay-inner-height-default",
+              "selectMultiple": false
+            },
+            {
+              "label": "Tall",
+              "value": "overlay-inner-height-tall",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Tall",
+              "value": "overlay-inner-height-xx-tall",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "hero-container-item": {
+      "classes": [
+        "accent-blue",
+        "accent-green",
+        "ambient",
+        "blue-light",
+        "container-full-width",
+        "container-large",
+        "container-medium",
+        "container-small",
+        "container-x-large",
+        "container-x-small",
+        "container-xx-large",
+        "container-xx-small",
+        "container-xxx-large",
+        "container-xxx-small",
+        "dark",
+        "gray-medium",
+        "navy",
+        "purple"
+      ],
+      "groups": [
+        {
+          "name": "Background Color",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Dark (gradient overlay)",
+              "value": "dark",
+              "selectMultiple": false
+            },
+            {
+              "label": "Navy (solid dark blue)",
+              "value": "navy",
+              "selectMultiple": false
+            },
+            {
+              "label": "Purple",
+              "value": "purple",
+              "selectMultiple": false
+            },
+            {
+              "label": "Accent Blue",
+              "value": "accent-blue",
+              "selectMultiple": false
+            },
+            {
+              "label": "Accent Green",
+              "value": "accent-green",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Blue",
+              "value": "blue-light",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Gray",
+              "value": "gray-medium",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Variation",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Ambient",
+              "value": "ambient",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Desktop Container Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "XXX Large (12 col)",
+              "value": "container-xxx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX Large (11 col)",
+              "value": "container-xx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "X Large (10 col)",
+              "value": "container-x-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large (9 col)",
+              "value": "container-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium (8 col)",
+              "value": "container-medium",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small (7 col)",
+              "value": "container-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "X Small (6 col)",
+              "value": "container-x-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX Small (5 col)",
+              "value": "container-xx-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX Small (4 col)",
+              "value": "container-xxx-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "Full Width",
+              "value": "container-full-width",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "story-card": {
+      "classes": [
+        "card-dashboard",
+        "card-hero",
+        "card-large",
+        "card-medium",
+        "card-small",
+        "dark-theme",
+        "hide-image-hide-desc",
+        "hide-image-show-desc",
+        "large-title",
+        "light-theme-no-stroke",
+        "light-theme-stroke",
+        "medium-theme",
+        "medium-theme-stroke",
+        "show-image-hide-desc",
+        "standard-title"
+      ],
+      "groups": [
+        {
+          "name": "Variant",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Dashboard",
+              "value": "card-dashboard",
+              "selectMultiple": false
+            },
+            {
+              "label": "Hero",
+              "value": "card-hero",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Size",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Small",
+              "value": "card-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium",
+              "value": "card-medium",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large",
+              "value": "card-large",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Standard - Layout",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Standard Title",
+              "value": "standard-title",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large Title",
+              "value": "large-title",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Dashboard - Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light Theme without Stroke",
+              "value": "light-theme-no-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Theme with Stroke",
+              "value": "light-theme-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Theme",
+              "value": "medium-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Theme With Stroke",
+              "value": "medium-theme-stroke",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark Theme",
+              "value": "dark-theme",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Dashboard - Layout",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Hide Image Show Description",
+              "value": "hide-image-show-desc",
+              "selectMultiple": false
+            },
+            {
+              "label": "Show Image Hide Description",
+              "value": "show-image-hide-desc",
+              "selectMultiple": false
+            },
+            {
+              "label": "Hide Image Hide Description",
+              "value": "hide-image-hide-desc",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "section": {
+      "classes": [
+        "align-center",
+        "align-left",
+        "align-right",
+        "bg-0066f5",
+        "bg-071d49",
+        "bg-338700",
+        "bg-479ff8",
+        "bg-666b7a",
+        "bg-8a2ecc",
+        "bg-a6b5e0",
+        "bg-a86bde",
+        "bg-b9b4b4",
+        "bg-cf451c",
+        "bg-f1f3ff",
+        "bg-f4f4f4",
+        "bg-f7634f",
+        "bg-fafafa",
+        "bg-fafbff",
+        "bg-ffffff",
+        "compact-padding",
+        "container-fill-right-margin",
+        "container-full-width",
+        "container-large",
+        "container-medium",
+        "container-small",
+        "container-x-large",
+        "container-x-small",
+        "container-xx-large",
+        "container-xx-small",
+        "container-xxx-large",
+        "container-xxx-small",
+        "content-regular",
+        "content-wide",
+        "float",
+        "footer-overlap",
+        "grid-full-page-4",
+        "grid-full-page-5-v1",
+        "grid-full-page-5-v2",
+        "grid-half-page-2",
+        "grid-half-page-3",
+        "height-default",
+        "height-short",
+        "height-tall",
+        "height-x-tall",
+        "height-xx-tall",
+        "homepage-overlap",
+        "large-radius",
+        "linear-gradient",
+        "margin-bottom-compact",
+        "medium-radius",
+        "mega-nav-padding",
+        "minimize-n-maximize",
+        "no-align",
+        "no-bottom-margin",
+        "no-bottom-padding",
+        "no-padding",
+        "no-radius",
+        "no-side-margin",
+        "no-top-bottom-padding",
+        "no-top-padding",
+        "none",
+        "overlap-predecessor",
+        "padding-bottom",
+        "section-bottom-margin",
+        "section-margin",
+        "section-padding",
+        "semi-transparent-layer",
+        "small-radius",
+        "static"
+      ],
+      "groups": [
+        {
+          "name": "Desktop Container Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "XXX Large (12 col)",
+              "value": "container-xxx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX Large (11 col)",
+              "value": "container-xx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "X Large (10 col)",
+              "value": "container-x-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large (9 col)",
+              "value": "container-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium (8 col)",
+              "value": "container-medium",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small (7 col)",
+              "value": "container-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "X Small (6 col)",
+              "value": "container-x-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX Small (5 col)",
+              "value": "container-xx-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX Small (4 col)",
+              "value": "container-xxx-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "Fill Right Margin",
+              "value": "container-fill-right-margin",
+              "selectMultiple": false
+            },
+            {
+              "label": "Full Width",
+              "value": "container-full-width",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Content Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Regular (133rem)",
+              "value": "content-regular",
+              "selectMultiple": false
+            },
+            {
+              "label": "Wide (144rem)",
+              "value": "content-wide",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Border Radius",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "None",
+              "value": "no-radius",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large Radius",
+              "value": "large-radius",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Radius",
+              "value": "medium-radius",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small Radius",
+              "value": "small-radius",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Transparency",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "None",
+              "value": "none",
+              "selectMultiple": false
+            },
+            {
+              "label": "Semi Transparent",
+              "value": "semi-transparent-layer",
+              "selectMultiple": false
+            },
+            {
+              "label": "Linear Gradient",
+              "value": "linear-gradient",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Alignment",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "None",
+              "value": "no-align",
+              "selectMultiple": false
+            },
+            {
+              "label": "Left",
+              "value": "align-left",
+              "selectMultiple": false
+            },
+            {
+              "label": "Right",
+              "value": "align-right",
+              "selectMultiple": false
+            },
+            {
+              "label": "Center",
+              "value": "align-center",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Margin",
+          "selectMultiple": true,
+          "options": [
+            {
+              "label": "No Bottom Margin",
+              "value": "no-bottom-margin",
+              "selectMultiple": true
+            },
+            {
+              "label": "Add Bottom Margin",
+              "value": "section-bottom-margin",
+              "selectMultiple": true
+            },
+            {
+              "label": "Compact Bottom Margin",
+              "value": "margin-bottom-compact",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Side Margin",
+              "value": "no-side-margin",
+              "selectMultiple": true
+            },
+            {
+              "label": "Section Margin",
+              "value": "section-margin",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Padding",
+          "selectMultiple": true,
+          "options": [
+            {
+              "label": "No Padding",
+              "value": "no-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Top Padding",
+              "value": "no-top-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Add Bottom Padding",
+              "value": "padding-bottom",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Bottom Padding",
+              "value": "no-bottom-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Top Bottom Padding",
+              "value": "no-top-bottom-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Section Padding",
+              "value": "section-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Compact Padding Mobile",
+              "value": "compact-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Mega Nav Padding",
+              "value": "mega-nav-padding",
+              "selectMultiple": true
+            }
+          ]
+        },
+        {
+          "name": "Background Color",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "White",
+              "value": "bg-ffffff",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark Navy Blue",
+              "value": "bg-071d49",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Periwinkle Blue",
+              "value": "bg-a6b5e0",
+              "selectMultiple": false
+            },
+            {
+              "label": "Very Light Lavender",
+              "value": "bg-f1f3ff",
+              "selectMultiple": false
+            },
+            {
+              "label": "Soft Off White",
+              "value": "bg-fafbff",
+              "selectMultiple": false
+            },
+            {
+              "label": "Slate Gray",
+              "value": "bg-666b7a",
+              "selectMultiple": false
+            },
+            {
+              "label": "Warm Gray",
+              "value": "bg-b9b4b4",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Gray",
+              "value": "bg-f4f4f4",
+              "selectMultiple": false
+            },
+            {
+              "label": "Snow White",
+              "value": "bg-fafafa",
+              "selectMultiple": false
+            },
+            {
+              "label": "Royal Purple",
+              "value": "bg-8a2ecc",
+              "selectMultiple": false
+            },
+            {
+              "label": "Soft Purple",
+              "value": "bg-a86bde",
+              "selectMultiple": false
+            },
+            {
+              "label": "Bright Blue",
+              "value": "bg-0066f5",
+              "selectMultiple": false
+            },
+            {
+              "label": "Sky Blue",
+              "value": "bg-479ff8",
+              "selectMultiple": false
+            },
+            {
+              "label": "Burnt Orange",
+              "value": "bg-cf451c",
+              "selectMultiple": false
+            },
+            {
+              "label": "Coral Red",
+              "value": "bg-f7634f",
+              "selectMultiple": false
+            },
+            {
+              "label": "Forest Green",
+              "value": "bg-338700",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Position",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Overlap Predecessor",
+              "value": "overlap-predecessor",
+              "selectMultiple": false
+            },
+            {
+              "label": "Footer Overlap",
+              "value": "footer-overlap",
+              "selectMultiple": false
+            },
+            {
+              "label": "Homepage Overlap",
+              "value": "homepage-overlap",
+              "selectMultiple": false
+            },
+            {
+              "label": "Minimize & Maximize",
+              "value": "minimize-n-maximize",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Desktop Height",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Default",
+              "value": "height-default",
+              "selectMultiple": false
+            },
+            {
+              "label": "Short",
+              "value": "height-short",
+              "selectMultiple": false
+            },
+            {
+              "label": "Tall",
+              "value": "height-tall",
+              "selectMultiple": false
+            },
+            {
+              "label": "X Tall",
+              "value": "height-x-tall",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX Tall",
+              "value": "height-xx-tall",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Desktop Grid Behavior",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Static",
+              "value": "static",
+              "selectMultiple": false
+            },
+            {
+              "label": "Float",
+              "value": "float",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Pre-built Grid Template",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Half Page 2 (2 equal columns)",
+              "value": "grid-half-page-2",
+              "selectMultiple": false
+            },
+            {
+              "label": "Half Page 3 (2 stacked left + 1 tall right)",
+              "value": "grid-half-page-3",
+              "selectMultiple": false
+            },
+            {
+              "label": "Full Page 4 (4-block dashboard)",
+              "value": "grid-full-page-4",
+              "selectMultiple": false
+            },
+            {
+              "label": "Full Page 5 v1 (2 top + wide center + 2 bottom-right)",
+              "value": "grid-full-page-5-v1",
+              "selectMultiple": false
+            },
+            {
+              "label": "Full Page 5 v2 (wide left + 3-column right)",
+              "value": "grid-full-page-5-v2",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "grid-container": {
+      "classes": [
+        "allow-overflow",
+        "bg-0066f5",
+        "bg-071d49",
+        "bg-338700",
+        "bg-479ff8",
+        "bg-666b7a",
+        "bg-8a2ecc",
+        "bg-a6b5e0",
+        "bg-a86bde",
+        "bg-b9b4b4",
+        "bg-cf451c",
+        "bg-f1f3ff",
+        "bg-f4f4f4",
+        "bg-f7634f",
+        "bg-fafafa",
+        "bg-fafbff",
+        "bg-ffffff",
+        "container-fill-right-margin",
+        "container-full-width",
+        "container-large",
+        "container-medium",
+        "container-small",
+        "container-x-large",
+        "container-x-small",
+        "container-xx-large",
+        "container-xx-small",
+        "container-xxx-large",
+        "container-xxx-small",
+        "content-regular",
+        "content-wide",
+        "dir-ltr",
+        "dir-rtl",
+        "footer-overlap",
+        "height-default",
+        "height-short",
+        "height-tall",
+        "height-x-tall",
+        "height-xx-tall",
+        "homepage-overlap",
+        "large-radius",
+        "linear-gradient",
+        "margin-bottom-compact",
+        "medium-radius",
+        "mega-nav-padding",
+        "minimize-n-maximize",
+        "no-bottom-margin",
+        "no-bottom-padding",
+        "no-padding",
+        "no-radius",
+        "no-side-margin",
+        "no-top-bottom-padding",
+        "no-top-margin",
+        "no-top-padding",
+        "none",
+        "overlap-predecessor",
+        "padding-bottom",
+        "regular-padding",
+        "section-bottom-margin",
+        "semi-transparent-layer",
+        "small-padding",
+        "small-radius"
+      ],
+      "groups": [
+        {
+          "name": "Content Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Regular (133rem)",
+              "value": "content-regular",
+              "selectMultiple": false
+            },
+            {
+              "label": "Wide (144rem)",
+              "value": "content-wide",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Border Radius",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "None",
+              "value": "no-radius",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large Radius",
+              "value": "large-radius",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Radius",
+              "value": "medium-radius",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small Radius",
+              "value": "small-radius",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Transparency",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "None",
+              "value": "none",
+              "selectMultiple": false
+            },
+            {
+              "label": "Semi Transparent",
+              "value": "semi-transparent-layer",
+              "selectMultiple": false
+            },
+            {
+              "label": "Linear Gradient",
+              "value": "linear-gradient",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Margin",
+          "selectMultiple": true,
+          "options": [
+            {
+              "label": "No Bottom Margin",
+              "value": "no-bottom-margin",
+              "selectMultiple": true
+            },
+            {
+              "label": "Add Bottom Margin",
+              "value": "section-bottom-margin",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Top Margin",
+              "value": "no-top-margin",
+              "selectMultiple": true
+            },
+            {
+              "label": "Compact Bottom Margin",
+              "value": "margin-bottom-compact",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Side Margin",
+              "value": "no-side-margin",
+              "selectMultiple": true
+            }
+          ]
+        },
+        {
+          "name": "Padding",
+          "selectMultiple": true,
+          "options": [
+            {
+              "label": "No Padding",
+              "value": "no-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Small",
+              "value": "small-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Regular",
+              "value": "regular-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Top Padding",
+              "value": "no-top-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Bottom Padding",
+              "value": "no-bottom-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Top & Bottom Padding",
+              "value": "no-top-bottom-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Mega Nav Padding",
+              "value": "mega-nav-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Add Bottom Padding",
+              "value": "padding-bottom",
+              "selectMultiple": true
+            }
+          ]
+        },
+        {
+          "name": "Background Color",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "White",
+              "value": "bg-ffffff",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark Navy Blue",
+              "value": "bg-071d49",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Periwinkle Blue",
+              "value": "bg-a6b5e0",
+              "selectMultiple": false
+            },
+            {
+              "label": "Very Light Lavender",
+              "value": "bg-f1f3ff",
+              "selectMultiple": false
+            },
+            {
+              "label": "Soft Off White",
+              "value": "bg-fafbff",
+              "selectMultiple": false
+            },
+            {
+              "label": "Slate Gray",
+              "value": "bg-666b7a",
+              "selectMultiple": false
+            },
+            {
+              "label": "Warm Gray",
+              "value": "bg-b9b4b4",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Gray",
+              "value": "bg-f4f4f4",
+              "selectMultiple": false
+            },
+            {
+              "label": "Snow White",
+              "value": "bg-fafafa",
+              "selectMultiple": false
+            },
+            {
+              "label": "Royal Purple",
+              "value": "bg-8a2ecc",
+              "selectMultiple": false
+            },
+            {
+              "label": "Soft Purple",
+              "value": "bg-a86bde",
+              "selectMultiple": false
+            },
+            {
+              "label": "Bright Blue",
+              "value": "bg-0066f5",
+              "selectMultiple": false
+            },
+            {
+              "label": "Sky Blue",
+              "value": "bg-479ff8",
+              "selectMultiple": false
+            },
+            {
+              "label": "Burnt Orange",
+              "value": "bg-cf451c",
+              "selectMultiple": false
+            },
+            {
+              "label": "Coral Red",
+              "value": "bg-f7634f",
+              "selectMultiple": false
+            },
+            {
+              "label": "Forest Green",
+              "value": "bg-338700",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Position",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Overlap Predecessor",
+              "value": "overlap-predecessor",
+              "selectMultiple": false
+            },
+            {
+              "label": "Footer Overlap",
+              "value": "footer-overlap",
+              "selectMultiple": false
+            },
+            {
+              "label": "Homepage Overlap",
+              "value": "homepage-overlap",
+              "selectMultiple": false
+            },
+            {
+              "label": "Minimize & Maximize",
+              "value": "minimize-n-maximize",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Desktop Height",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Default",
+              "value": "height-default",
+              "selectMultiple": false
+            },
+            {
+              "label": "Short",
+              "value": "height-short",
+              "selectMultiple": false
+            },
+            {
+              "label": "Tall",
+              "value": "height-tall",
+              "selectMultiple": false
+            },
+            {
+              "label": "X Tall",
+              "value": "height-x-tall",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX Tall",
+              "value": "height-xx-tall",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Direction",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Left to Right (LTR)",
+              "value": "dir-ltr",
+              "selectMultiple": false
+            },
+            {
+              "label": "Right to Left (RTL)",
+              "value": "dir-rtl",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Desktop Container Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "XXX Large (12 col)",
+              "value": "container-xxx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX Large (11 col)",
+              "value": "container-xx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "X Large (10 col)",
+              "value": "container-x-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large (9 col)",
+              "value": "container-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium (8 col)",
+              "value": "container-medium",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small (7 col)",
+              "value": "container-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "X Small (6 col)",
+              "value": "container-x-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX Small (5 col)",
+              "value": "container-xx-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX Small (4 col)",
+              "value": "container-xxx-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "Fill Right Margin",
+              "value": "container-fill-right-margin",
+              "selectMultiple": false
+            },
+            {
+              "label": "Full Width",
+              "value": "container-full-width",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Overflow",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Allow Overflow",
+              "value": "allow-overflow",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "inner-grid": {
+      "classes": [
+        "allow-overflow",
+        "bg-0066f5",
+        "bg-071d49",
+        "bg-338700",
+        "bg-479ff8",
+        "bg-666b7a",
+        "bg-8a2ecc",
+        "bg-a6b5e0",
+        "bg-a86bde",
+        "bg-b9b4b4",
+        "bg-cf451c",
+        "bg-f1f3ff",
+        "bg-f4f4f4",
+        "bg-f7634f",
+        "bg-fafafa",
+        "bg-fafbff",
+        "bg-ffffff",
+        "cols-1-10-1",
+        "cols-1-11",
+        "cols-1-3-7-1",
+        "cols-1-4",
+        "cols-1-4-1-5",
+        "cols-1-5-1-4-1",
+        "cols-1-6-1-3",
+        "cols-1-6-5-1",
+        "cols-1-7-4",
+        "cols-1-9-2",
+        "cols-10-2",
+        "cols-11-1",
+        "cols-12",
+        "cols-2-1-8",
+        "cols-2-1-9",
+        "cols-2-10",
+        "cols-2-4-1-3-2",
+        "cols-2-6-3",
+        "cols-2-8-2",
+        "cols-3-1-8",
+        "cols-3-3-3-3",
+        "cols-3-3-6",
+        "cols-3-6-3",
+        "cols-3-8",
+        "cols-3-8-1",
+        "cols-3-9",
+        "cols-4-1-7",
+        "cols-4-4-4",
+        "cols-4-8",
+        "cols-5-1-3-3",
+        "cols-5-1-5-1",
+        "cols-5-1-6",
+        "cols-5-2-5",
+        "cols-5-5-2",
+        "cols-5-7",
+        "cols-6-1-5",
+        "cols-6-3-3",
+        "cols-6-5-1",
+        "cols-6-6",
+        "cols-7-1-4",
+        "cols-7-2-3",
+        "cols-7-5",
+        "cols-8-1-3",
+        "cols-8-4",
+        "cols-9-2-1",
+        "cols-9-3",
+        "compact-padding",
+        "dir-ltr",
+        "dir-rtl",
+        "full-width",
+        "height-default",
+        "height-short",
+        "height-tall",
+        "height-x-tall",
+        "height-xx-tall",
+        "large-radius",
+        "linear-gradient",
+        "margin-bottom-compact",
+        "medium-radius",
+        "mega-nav-padding",
+        "mobile-reverse",
+        "no-bottom-margin",
+        "no-bottom-padding",
+        "no-padding",
+        "no-radius",
+        "no-side-margin",
+        "no-top-bottom-padding",
+        "no-top-padding",
+        "none",
+        "padding-bottom",
+        "regular-padding",
+        "section-bottom-margin",
+        "semi-transparent-layer",
+        "small-padding",
+        "small-radius",
+        "width-large",
+        "width-medium",
+        "width-small",
+        "width-x-large",
+        "width-x-small",
+        "width-xx-large",
+        "width-xx-small",
+        "width-xxx-large",
+        "width-xxx-small"
+      ],
+      "groups": [
+        {
+          "name": "Column Layout",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "6-6 (Two equal halves)",
+              "value": "cols-6-6",
+              "selectMultiple": false
+            },
+            {
+              "label": "5-2-5 (Two wide, one narrow center)",
+              "value": "cols-5-2-5",
+              "selectMultiple": false
+            },
+            {
+              "label": "4-4-4 (Three equal thirds)",
+              "value": "cols-4-4-4",
+              "selectMultiple": false
+            },
+            {
+              "label": "3-6-3 (Wide center)",
+              "value": "cols-3-6-3",
+              "selectMultiple": false
+            },
+            {
+              "label": "8-4 (Wide left)",
+              "value": "cols-8-4",
+              "selectMultiple": false
+            },
+            {
+              "label": "4-8 (Wide right)",
+              "value": "cols-4-8",
+              "selectMultiple": false
+            },
+            {
+              "label": "7-5 (Slightly wide left)",
+              "value": "cols-7-5",
+              "selectMultiple": false
+            },
+            {
+              "label": "5-7 (Slightly wide right)",
+              "value": "cols-5-7",
+              "selectMultiple": false
+            },
+            {
+              "label": "1-10-1 (Narrow sides, wide center)",
+              "value": "cols-1-10-1",
+              "selectMultiple": false
+            },
+            {
+              "label": "5-1-6",
+              "value": "cols-5-1-6",
+              "selectMultiple": false
+            },
+            {
+              "label": "2-8-2",
+              "value": "cols-2-8-2",
+              "selectMultiple": false
+            },
+            {
+              "label": "12 ( full width)",
+              "value": "cols-12",
+              "selectMultiple": false
+            },
+            {
+              "label": "11-1",
+              "value": "cols-11-1",
+              "selectMultiple": false
+            },
+            {
+              "label": "6-1-5",
+              "value": "cols-6-1-5",
+              "selectMultiple": false
+            },
+            {
+              "label": "1-11",
+              "value": "cols-1-11",
+              "selectMultiple": false
+            },
+            {
+              "label": "3-3-3-3",
+              "value": "cols-3-3-3-3",
+              "selectMultiple": false
+            },
+            {
+              "label": "9-2-1",
+              "value": "cols-9-2-1",
+              "selectMultiple": false
+            },
+            {
+              "label": "2-1-8",
+              "value": "cols-2-1-8",
+              "selectMultiple": false
+            },
+            {
+              "label": "3-8",
+              "value": "cols-3-8",
+              "selectMultiple": false
+            },
+            {
+              "label": "3-3-6",
+              "value": "cols-3-3-6",
+              "selectMultiple": false
+            },
+            {
+              "label": "6-3-3",
+              "value": "cols-6-3-3",
+              "selectMultiple": false
+            },
+            {
+              "label": "10-2",
+              "value": "cols-10-2",
+              "selectMultiple": false
+            },
+            {
+              "label": "11-1",
+              "value": "cols-11-1",
+              "selectMultiple": false
+            },
+            {
+              "label": "3-8-1",
+              "value": "cols-3-8-1",
+              "selectMultiple": false
+            },
+            {
+              "label": "7-1-4",
+              "value": "cols-7-1-4",
+              "selectMultiple": false
+            },
+            {
+              "label": "2-10",
+              "value": "cols-2-10",
+              "selectMultiple": false
+            },
+            {
+              "label": "5-1-5-1",
+              "value": "cols-5-1-5-1",
+              "selectMultiple": false
+            },
+            {
+              "label": "1-6-5-1",
+              "value": "cols-1-6-5-1",
+              "selectMultiple": false
+            },
+            {
+              "label": "5-1-3-3",
+              "value": "cols-5-1-3-3",
+              "selectMultiple": false
+            },
+            {
+              "label": "6-5-1",
+              "value": "cols-6-5-1",
+              "selectMultiple": false
+            },
+            {
+              "label": "1-3-7-1",
+              "value": "cols-1-3-7-1",
+              "selectMultiple": false
+            },
+            {
+              "label": "8-1-3",
+              "value": "cols-8-1-3",
+              "selectMultiple": false
+            },
+            {
+              "label": "2-4-1-3-2",
+              "value": "cols-2-4-1-3-2",
+              "selectMultiple": false
+            },
+            {
+              "label": "1-7-4",
+              "value": "cols-1-7-4",
+              "selectMultiple": false
+            },
+            {
+              "label": "2-8-2",
+              "value": "cols-2-8-2",
+              "selectMultiple": false
+            },
+            {
+              "label": "5-5-2",
+              "value": "cols-5-5-2",
+              "selectMultiple": false
+            },
+            {
+              "label": "1-6-1-3",
+              "value": "cols-1-6-1-3",
+              "selectMultiple": false
+            },
+            {
+              "label": "9-3",
+              "value": "cols-9-3",
+              "selectMultiple": false
+            },
+            {
+              "label": "1-5-1-4-1",
+              "value": "cols-1-5-1-4-1",
+              "selectMultiple": false
+            },
+            {
+              "label": "4-1-7",
+              "value": "cols-4-1-7",
+              "selectMultiple": false
+            },
+            {
+              "label": "2-1-9",
+              "value": "cols-2-1-9",
+              "selectMultiple": false
+            },
+            {
+              "label": "1-9-2",
+              "value": "cols-1-9-2",
+              "selectMultiple": false
+            },
+            {
+              "label": "1-4",
+              "value": "cols-1-4",
+              "selectMultiple": false
+            },
+            {
+              "label": "3-9",
+              "value": "cols-3-9",
+              "selectMultiple": false
+            },
+            {
+              "label": "4-4-4",
+              "value": "cols-4-4-4",
+              "selectMultiple": false
+            },
+            {
+              "label": "3-1-8",
+              "value": "cols-3-1-8",
+              "selectMultiple": false
+            },
+            {
+              "label": "1-4-1-5",
+              "value": "cols-1-4-1-5",
+              "selectMultiple": false
+            },
+            {
+              "label": "2-6-3",
+              "value": "cols-2-6-3",
+              "selectMultiple": false
+            },
+            {
+              "label": "7-2-3",
+              "value": "cols-7-2-3",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Margin",
+          "selectMultiple": true,
+          "options": [
+            {
+              "label": "No Bottom Margin",
+              "value": "no-bottom-margin",
+              "selectMultiple": true
+            },
+            {
+              "label": "Add Bottom Margin",
+              "value": "section-bottom-margin",
+              "selectMultiple": true
+            },
+            {
+              "label": "Compact Bottom Margin",
+              "value": "margin-bottom-compact",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Side Margin",
+              "value": "no-side-margin",
+              "selectMultiple": true
+            }
+          ]
+        },
+        {
+          "name": "Padding",
+          "selectMultiple": true,
+          "options": [
+            {
+              "label": "No Padding",
+              "value": "no-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Small",
+              "value": "small-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Compact Padding Mobile",
+              "value": "compact-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Regular",
+              "value": "regular-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Top Padding",
+              "value": "no-top-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Bottom Padding",
+              "value": "no-bottom-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Top & Bottom Padding",
+              "value": "no-top-bottom-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Mega Nav Padding",
+              "value": "mega-nav-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Add Bottom Padding",
+              "value": "padding-bottom",
+              "selectMultiple": true
+            }
+          ]
+        },
+        {
+          "name": "Background Color",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "White",
+              "value": "bg-ffffff",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark Navy Blue",
+              "value": "bg-071d49",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Periwinkle Blue",
+              "value": "bg-a6b5e0",
+              "selectMultiple": false
+            },
+            {
+              "label": "Very Light Lavender",
+              "value": "bg-f1f3ff",
+              "selectMultiple": false
+            },
+            {
+              "label": "Soft Off White",
+              "value": "bg-fafbff",
+              "selectMultiple": false
+            },
+            {
+              "label": "Slate Gray",
+              "value": "bg-666b7a",
+              "selectMultiple": false
+            },
+            {
+              "label": "Warm Gray",
+              "value": "bg-b9b4b4",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light Gray",
+              "value": "bg-f4f4f4",
+              "selectMultiple": false
+            },
+            {
+              "label": "Snow White",
+              "value": "bg-fafafa",
+              "selectMultiple": false
+            },
+            {
+              "label": "Royal Purple",
+              "value": "bg-8a2ecc",
+              "selectMultiple": false
+            },
+            {
+              "label": "Soft Purple",
+              "value": "bg-a86bde",
+              "selectMultiple": false
+            },
+            {
+              "label": "Bright Blue",
+              "value": "bg-0066f5",
+              "selectMultiple": false
+            },
+            {
+              "label": "Sky Blue",
+              "value": "bg-479ff8",
+              "selectMultiple": false
+            },
+            {
+              "label": "Burnt Orange",
+              "value": "bg-cf451c",
+              "selectMultiple": false
+            },
+            {
+              "label": "Coral Red",
+              "value": "bg-f7634f",
+              "selectMultiple": false
+            },
+            {
+              "label": "Forest Green",
+              "value": "bg-338700",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Desktop Height",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Default",
+              "value": "height-default",
+              "selectMultiple": false
+            },
+            {
+              "label": "Short",
+              "value": "height-short",
+              "selectMultiple": false
+            },
+            {
+              "label": "Tall",
+              "value": "height-tall",
+              "selectMultiple": false
+            },
+            {
+              "label": "X Tall",
+              "value": "height-x-tall",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX Tall",
+              "value": "height-xx-tall",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Direction",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Left to Right (LTR)",
+              "value": "dir-ltr",
+              "selectMultiple": false
+            },
+            {
+              "label": "Right to Left (RTL)",
+              "value": "dir-rtl",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Transparency",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "None",
+              "value": "none",
+              "selectMultiple": false
+            },
+            {
+              "label": "Semi Transparent",
+              "value": "semi-transparent-layer",
+              "selectMultiple": false
+            },
+            {
+              "label": "Linear Gradient",
+              "value": "linear-gradient",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Container Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Full Width",
+              "value": "full-width",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX-Large",
+              "value": "width-xxx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Large",
+              "value": "width-xx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Large",
+              "value": "width-x-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large",
+              "value": "width-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium",
+              "value": "width-medium",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small",
+              "value": "width-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Small",
+              "value": "width-x-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Small",
+              "value": "width-xx-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "XXX-Small",
+              "value": "width-xxx-small",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Border Radius",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "None",
+              "value": "no-radius",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large Radius",
+              "value": "large-radius",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium Radius",
+              "value": "medium-radius",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small Radius",
+              "value": "small-radius",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Layout Order",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Mobile Reverse",
+              "value": "mobile-reverse",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Overflow",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Allow Overflow",
+              "value": "allow-overflow",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    },
+    "accordion-v2": {
+      "classes": [
+        "accordion-full-width",
+        "accordion-large",
+        "accordion-medium",
+        "accordion-small",
+        "accordion-x-large",
+        "accordion-x-small",
+        "accordion-xx-large",
+        "align-center",
+        "align-left",
+        "align-right",
+        "dark-theme",
+        "h2-size",
+        "h3-size",
+        "h4-size",
+        "h5-size",
+        "h6-size",
+        "light-theme",
+        "margin-bottom-0",
+        "no-top-padding",
+        "padding-bottom",
+        "section-padding",
+        "show-tabs-desktop"
+      ],
+      "groups": [
+        {
+          "name": "Alignment",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Align Left",
+              "value": "align-left",
+              "selectMultiple": false
+            },
+            {
+              "label": "Align Center",
+              "value": "align-center",
+              "selectMultiple": false
+            },
+            {
+              "label": "Align Right",
+              "value": "align-right",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Theme",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Light Theme",
+              "value": "light-theme",
+              "selectMultiple": false
+            },
+            {
+              "label": "Dark Theme",
+              "value": "dark-theme",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Padding",
+          "selectMultiple": true,
+          "options": [
+            {
+              "label": "Section-Padding",
+              "value": "section-padding",
+              "selectMultiple": true
+            },
+            {
+              "label": "Add Bottom Padding",
+              "value": "padding-bottom",
+              "selectMultiple": true
+            },
+            {
+              "label": "No Top Padding",
+              "value": "no-top-padding",
+              "selectMultiple": true
+            }
+          ]
+        },
+        {
+          "name": "Margin",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "No bottom margin",
+              "value": "margin-bottom-0",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Decorative Title Size - Desktop",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "H2",
+              "value": "h2-size",
+              "selectMultiple": false
+            },
+            {
+              "label": "H3",
+              "value": "h3-size",
+              "selectMultiple": false
+            },
+            {
+              "label": "H4",
+              "value": "h4-size",
+              "selectMultiple": false
+            },
+            {
+              "label": "H5",
+              "value": "h5-size",
+              "selectMultiple": false
+            },
+            {
+              "label": "H6",
+              "value": "h6-size",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Utility Nav Options",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Show tabs on desktop",
+              "value": "show-tabs-desktop",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Desktop Width",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Full Width",
+              "value": "accordion-full-width",
+              "selectMultiple": false
+            },
+            {
+              "label": "XX-Large",
+              "value": "accordion-xx-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Large",
+              "value": "accordion-x-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Large",
+              "value": "accordion-large",
+              "selectMultiple": false
+            },
+            {
+              "label": "Medium",
+              "value": "accordion-medium",
+              "selectMultiple": false
+            },
+            {
+              "label": "Small",
+              "value": "accordion-small",
+              "selectMultiple": false
+            },
+            {
+              "label": "X-Small",
+              "value": "accordion-x-small",
+              "selectMultiple": false
+            }
+          ]
+        }
+      ]
+    }
   }
 }
