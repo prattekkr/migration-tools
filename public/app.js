@@ -1718,7 +1718,7 @@ function lcCrossLocaleMappings() {
   return [...groups, ...custom].filter(m => m.from && m.to);
 }
 
-// Alt text is always refreshed; only captions have an overwrite choice.
+// DAM description/title refresh alt; filename fallback preserves authored text.
 function lcOverwriteCaptions() { return document.getElementById('lcOverwriteCaptions')?.checked || false; }
 
 // internalDomains = the domains NOT ticked as external

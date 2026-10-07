@@ -3253,7 +3253,8 @@ function xmlAttrEscape(s) {
 // text with the AbbVie fallback chain (mirrors getAltTextFromDam):
 //   dc:description → dc:title → asset filename without extension.
 // The filename fallback only applies when the asset actually exists (metadata 200);
-// if the asset can't be reached the value is null (no alt). Deduped; concurrency-limited.
+// Successful values retain their source so filename fallback cannot overwrite authored alt.
+// If the asset can't be reached the value is null. Deduped; concurrency-limited.
 async function fetchDamAltText(damPaths, cfg) {
   const base = (cfg.host || '').replace(/\/$/, '');
   const map = new Map();
@@ -3271,8 +3272,11 @@ async function fetchDamAltText(damPaths, cfg) {
           auth: { username: cfg.username || '', password: cfg.password || '' },
         });
         if (resp.status === 200 && resp.data && typeof resp.data === 'object') {
-          const alt = firstStr(resp.data['dc:description']) || firstStr(resp.data['dc:title']) || fileBase(dp);
-          map.set(dp, alt || null);          // asset exists → description | title | filename
+          const description = firstStr(resp.data['dc:description']);
+          const title = firstStr(resp.data['dc:title']);
+          const text = description || title || fileBase(dp);
+          const source = description ? 'description' : title ? 'title' : 'filename';
+          map.set(dp, text ? { text, source } : null);
         } else {
           map.set(dp, null);                 // asset not found / unreachable → no alt
         }
@@ -3282,8 +3286,8 @@ async function fetchDamAltText(damPaths, cfg) {
   return map;
 }
 
-// Refresh sibling "<imageProp>Alt" values from DAM. A legacy plain alt is also
-// refreshed on single-image nodes; multi-image nodes use their per-image siblings.
+// DAM description/title override authored alt; filenames only fill unlabelled images.
+// A legacy plain alt is also refreshed on single-image nodes.
 function qaFixAltText(xml, altByValue) {
   const changes = [];
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
@@ -3295,8 +3299,11 @@ function qaFixAltText(xml, altByValue) {
     let out = attrStr, changed = false;
     const items = imageAltProps(attrs, raw);
     for (const it of items) {
-      const title = altByValue.get(it.value);
-      if (!title) continue;
+      const metadata = altByValue.get(it.value);
+      if (!metadata) continue;
+      const authoredAlt = (it.altValue || '').trim() || (items.length === 1 && (attrs.alt || '').trim());
+      if (metadata.source === 'filename' && authoredAlt) continue;
+      const title = metadata.text;
       const val = xmlAttrEscape(title);
       if (it.altValue !== val) {
         if (it.altValue !== undefined)
@@ -3386,7 +3393,7 @@ async function buildMetaFixedZip(buffer, fixerFn, { includePreview = false } = {
 
 // Shared alt-refresh computation: scan all non-decorative component images,
 // resolve each to a /content/dam path, fetch DAM metadata, and build
-// altByValue (image value -> alt text). Returns { altByValue, missingTotal, skips }.
+// altByValue (image value -> { text, source }). Returns { altByValue, missingTotal, skips }.
 async function computeAltFills(buffer, uuidToRow, damNorm, hostCfg) {
   const outer = new AdmZip(buffer);
   const innerE = outer.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
@@ -3464,7 +3471,7 @@ async function computeCaptionFills(buffer, uuidToRow, damNorm, hostCfg, overwrit
   const captionByValue = new Map();
   for (const [value, dam] of valueToDam) {
     const t = textByDam.get(dam);
-    if (t) captionByValue.set(value, t);
+    if (t) captionByValue.set(value, t.text);
     else addSkip('asset not found on AEM author (no metadata)', dam);
   }
   return { captionByValue, candidateTotal, skips };
