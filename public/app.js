@@ -1557,8 +1557,10 @@ function lcRenderStyles(data) {
 }
 
 const LC_STYLE_ISSUES = {
+  'hero-height-manual': { label: 'Hero height needs manual move', cls: 'bg-warning text-dark', hint: 'The item\'s height-* class could not be moved to the hero-container automatically (see the reason in the report), so it is left in place. Move it manually.' },
   'move-target-undeclared': { label: 'Class can\'t be moved (target not in modelFields)', cls: 'bg-warning text-dark', hint: 'The target *_commonCustomClass is not declared in modelFields, so Fix leaves the class untouched. Move it manually.' },
   'cta-default-redundant': { label: 'CTA: default-cta removed', cls: 'bg-info', hint: 'back-cta is present, so Fix removes default-cta automatically.' },
+  'hero-height-move': { label: 'Hero height moved to parent', cls: 'bg-primary', hint: 'Fix moves the hero-container-item\'s height-* class to its parent hero-container, replacing any height the parent already has. Other non-picklist classes on the item are dropped.' },
   'class-move': { label: 'Class moved to common field', cls: 'bg-primary', hint: 'Fix moves these body-unica-* classes into the free-form *_commonCustomClass (appended comma-separated after existing values). Any other non-picklist class in the same property is dropped.' },
   'unsupported-class': { label: 'Class not in picklist', cls: 'bg-danger', hint: 'Fix drops these classes from the dynamic-picklist property.' },
   'undeclared-field': { label: 'Property not in modelFields', cls: 'bg-warning text-dark', hint: 'Fix removes the whole property from the node.' },
@@ -1589,7 +1591,7 @@ function lcRenderStyleGroups() {
   const rows = view.groups.map((group, index) => ({ group, index })).filter(({ group }) => lcStyleGroupVisible(group));
   const html = rows.map(({ group, index }) => {
     const meta = LC_STYLE_ISSUES[group.issue] || { label: group.issue, cls: 'bg-secondary', hint: '' };
-    const detail = ['unsupported-class', 'class-move', 'move-target-undeclared'].includes(group.issue) ? `<code class="${group.issue === 'unsupported-class' ? 'text-danger' : 'text-primary'}">${escHtml(group.label)}</code>` : '';
+    const detail = ['unsupported-class', 'class-move', 'move-target-undeclared', 'hero-height-move', 'hero-height-manual'].includes(group.issue) ? `<code class="${group.issue === 'unsupported-class' ? 'text-danger' : 'text-primary'}">${escHtml(group.label)}</code>` : '';
     return `
     <details class="border rounded mb-2" ontoggle="if(this.open)lcStyleOpen(${index})">
       <summary class="p-2 d-flex align-items-center gap-2 flex-wrap" style="cursor:pointer">
@@ -1819,6 +1821,7 @@ async function lcFix(checks) {
     const styleConflicts = parseInt(res.headers.get('X-Style-Conflicts') || '0', 10);
     const styleResolved = parseInt(res.headers.get('X-Style-Resolved') || '0', 10);
     const styleMoved = parseInt(res.headers.get('X-Style-Moved') || '0', 10);
+    const heroMoved = parseInt(res.headers.get('X-Hero-Height-Moved') || '0', 10);
     const styleManual = parseInt(res.headers.get('X-Style-Manual') || '0', 10);
     const reportId = res.headers.get('X-Report-Id');
     const persisted = parseInt(res.headers.get('X-Custom-Persisted') || '0', 10);
@@ -1833,7 +1836,8 @@ async function lcFix(checks) {
       + (altSkipped > 0 ? ` Skipped alt refresh for ${altSkipped} asset(s); existing text retained (see report).` : '')
       + (styleResolved > 0 ? ` Applied ${styleResolved} single-select style choice(s).` : '')
       + (styleMoved > 0 ? ` Moved body-unica-* classes to the common class field on ${styleMoved} property(ies).` : '')
-      + (styleManual > 0 ? ` ${styleManual} class(es) could not be moved because the common class field is not in modelFields; retained for manual review (see report).` : '')
+      + (heroMoved > 0 ? ` Moved the height class of ${heroMoved} hero-container-item(s) to the parent hero-container.` : '')
+      + (styleManual > 0 ? ` ${styleManual} class(es) could not be moved automatically; retained for manual review (see report).` : '')
       + (styleConflicts > 0 ? ` ${styleConflicts} single-select style conflict(s) require manual review; selections retained (see report).` : '')
       + (recovered > 0 ? ` Recovered ${recovered} asset(s) from AEM author — synced to all env asset-maps.` : '')
       + (persisted > 0 ? ` Saved ${persisted} manual mapping(s) to the asset-map for: ${persistEnvs.replace(/,/g, ', ')} (per-env host).` : '');

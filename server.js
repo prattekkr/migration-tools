@@ -2295,6 +2295,10 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
         } else {
           addEx(stylesAgg, file, s.issue === 'undeclared-field'
             ? `${s.node} [${s.block}] ${s.prop}: not declared in modelFields`
+            : s.issue === 'hero-height-move'
+              ? `${s.node} [${s.block}] ${s.prop}: ${s.heightMoved.join(', ')} → parent hero-container${s.moved.length ? `; also moves ${s.moved.join(', ')} to ${s.target}` : ''}${s.dropped.length ? `; drops ${s.dropped.join(', ')}` : ''}`
+            : s.issue === 'hero-height-manual'
+              ? `${s.node} [${s.block}] ${s.prop}: ${s.unsupported.join(', ')} not moved — ${s.reason} (manual review)`
             : s.issue === 'class-move'
               ? `${s.node} [${s.block}] ${s.prop}: ${s.moved.join(', ')} → ${s.target}${s.dropped.length ? `; drops ${s.dropped.join(', ')}` : ''}`
             : s.issue === 'move-target-undeclared'
@@ -2585,7 +2589,69 @@ function styleConfigKey(attrs, vocab) {
 const STYLE_MOVE_PATTERNS = [/^body-unica-/];
 const isMovableStyleClass = token => STYLE_MOVE_PATTERNS.some(pattern => pattern.test(token));
 
-function styleFieldFindings(attrs, raw, vocab) {
+// hero-container-item: any height-* class belongs to the parent hero-container and always
+// replaces that parent's height (a single-select group). Plans are keyed by tag offset.
+const HERO_PARENT_ID = 'hero-container';
+const HERO_ITEM_ID = 'hero-container-item';
+const isHeroHeightClass = token => /^height-/.test(token);
+const parseStyleList = value => String(value || '').split(',').map(t => t.trim()).filter(Boolean);
+const styleModelFields = attrs => attrs.modelfields === undefined ? null : new Set(
+  attrs.modelfields.replace(/^\{String\}/, '').replace(/^\[|\]$/g, '')
+    .split(',').map(field => field.split('@')[0].trim().toLowerCase()).filter(Boolean));
+
+function planHeroHeights(xml, vocab) {
+  const plan = { items: new Map(), parents: new Map() };
+  const parentVocab = vocab[HERO_PARENT_ID];
+  if (!parentVocab || !vocab[HERO_ITEM_ID]) return plan;
+  const parentClasses = new Set(styleVocabularyClasses(parentVocab));
+  const itemClasses = new Set(styleVocabularyClasses(vocab[HERO_ITEM_ID]));
+  const parentGroups = Array.isArray(parentVocab) ? [] : (parentVocab.groups || []);
+  const tagRe = /<(\/?)([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")*)\s*(\/?)>/g;
+  const stack = [], items = [];
+  let m;
+  while ((m = tagRe.exec(xml))) {
+    if (m[1]) { stack.pop(); continue; }
+    const attrs = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
+    while ((a = aRe.exec(m[3]))) attrs[a[1].toLowerCase()] = a[2];
+    const id = (attrs.auecomponentid || attrs.model || '').trim();
+    const entry = { offset: m.index, id, attrs };
+    if (id === HERO_ITEM_ID) {
+      const heights = [...new Set(parseStyleList(attrs.classes_customdynamicclass).filter(t => isHeroHeightClass(t) && !itemClasses.has(t)))];
+      if (heights.length) items.push({ offset: m.index, heights, parent: [...stack].reverse().find(n => n.id === HERO_PARENT_ID) || null });
+    }
+    if (!m[4]) stack.push(entry);
+  }
+
+  const byParent = new Map();
+  for (const item of items) {
+    const keep = reason => plan.items.set(item.offset, { keep: item.heights, reason });
+    if (!item.parent) { keep('no hero-container parent found; move the height manually'); continue; }
+    if (item.heights.length > 1) { keep(`multiple height classes (${item.heights.join(', ')}) on one item; choose one manually`); continue; }
+    const fields = styleModelFields(item.parent.attrs);
+    if (fields && !fields.has('classes_customdynamicclass')) { keep('the hero-container does not declare classes_customDynamicClass in modelFields; move the height manually'); continue; }
+    if (!parentClasses.has(item.heights[0])) continue;   // not valid on the parent either: dropped like any unsupported class
+    if (!byParent.has(item.parent.offset)) byParent.set(item.parent.offset, { parent: item.parent, items: [] });
+    byParent.get(item.parent.offset).items.push(item);
+  }
+  for (const { parent, items: group } of byParent.values()) {
+    const distinct = [...new Set(group.map(item => item.heights[0]))];
+    if (distinct.length > 1) {
+      for (const item of group) plan.items.set(item.offset, { keep: item.heights, reason: `items under one hero-container disagree on height (${distinct.join(', ')}); choose manually` });
+      continue;
+    }
+    const height = distinct[0];
+    const heightGroup = parentGroups.find(g => g.options.some(option => option.value === height));
+    plan.parents.set(parent.offset, {
+      height,
+      groupName: heightGroup ? heightGroup.name : null,
+      groupOptions: heightGroup ? heightGroup.options.map(option => option.value) : [...parentClasses].filter(isHeroHeightClass),
+    });
+    for (const item of group) plan.items.set(item.offset, { move: [height] });
+  }
+  return plan;
+}
+
+function styleFieldFindings(attrs, raw, vocab, ctx = {}) {
   const key = styleConfigKey(attrs, vocab);
   const block = key || attrs.auecomponentid || attrs.model || '(unknown block)';
   const fields = attrs.modelfields === undefined ? null : new Set(
@@ -2602,20 +2668,24 @@ function styleFieldFindings(attrs, raw, vocab) {
     const tokens = attrs[ln].split(',').map(t => t.trim()).filter(Boolean);
     const unsupported = tokens.filter(t => !allowed.has(t));
     if (unsupported.length) {
-      const movable = unsupported.filter(isMovableStyleClass);
+      const heightMoved = ctx.heroItem && ctx.heroItem.move ? unsupported.filter(t => ctx.heroItem.move.includes(t)) : [];
+      const heightKept = ctx.heroItem && ctx.heroItem.keep ? unsupported.filter(t => ctx.heroItem.keep.includes(t)) : [];
+      const rest = unsupported.filter(t => !heightMoved.includes(t) && !heightKept.includes(t));
+      const movable = rest.filter(isMovableStyleClass);
       const targetLn = ln.replace(/customdynamicclass$/, 'commoncustomclass');
       const target = raw[targetLn] || raw[ln].replace(/customDynamicClass$/i, 'commonCustomClass');
       const blocked = movable.length > 0 && fields !== null && !fields.has(targetLn);   // target would be removed as undeclared next scan
       const moved = blocked ? [] : movable;
-      const dropped = unsupported.filter(t => !movable.includes(t));
-      if (blocked) findings.push({ block, prop: raw[ln], issue: 'move-target-undeclared', value: attrs[ln], unsupported: movable, target });
-      if (moved.length || dropped.length) {
+      const dropped = rest.filter(t => !movable.includes(t));
+      if (heightKept.length) findings.push({ block, prop: raw[ln], issue: 'hero-height-manual', value: attrs[ln], unsupported: heightKept, reason: ctx.heroItem.reason });
+      if (blocked) findings.push({ block, prop: raw[ln], issue: 'move-target-undeclared', value: attrs[ln], unsupported: movable, target, reason: `${target} is not declared in modelFields; move the class manually` });
+      if (heightMoved.length || moved.length || dropped.length) {
         const existing = (attrs[targetLn] || '').split(',').map(t => t.trim()).filter(Boolean);
         findings.push({
-          block, prop: raw[ln], issue: moved.length ? 'class-move' : 'unsupported-class', value: attrs[ln],
-          unsupported: [...moved, ...dropped], moved, dropped, target,
+          block, prop: raw[ln], issue: heightMoved.length ? 'hero-height-move' : moved.length ? 'class-move' : 'unsupported-class', value: attrs[ln],
+          unsupported: [...heightMoved, ...moved, ...dropped], heightMoved, moved, dropped, target,
           mergedValue: [...new Set([...existing, ...moved])].join(','),
-          replacementValue: tokens.filter(t => allowed.has(t) || (blocked && movable.includes(t))).join(','),
+          replacementValue: tokens.filter(t => allowed.has(t) || (blocked && movable.includes(t)) || heightKept.includes(t)).join(','),
         });
       }
     }
@@ -2629,6 +2699,7 @@ function styleFieldFindings(attrs, raw, vocab) {
     const groups = Array.isArray(vocab[key]) ? [] : (vocab[key].groups || []);
     for (const group of groups) {
       if (group.selectMultiple !== false || group.name === '(ungrouped)') continue;
+      if (ctx.heroParent && group.name === ctx.heroParent.groupName) continue;   // the item's height replaces the whole group
       const options = new Set(group.options.map(option => option.value));
       const selected = [...new Set(groupTokens.filter(token => options.has(token)))];
       if (selected.length > 1) findings.push({
@@ -2644,6 +2715,7 @@ function styleFieldFindings(attrs, raw, vocab) {
 function scanUnsupportedStyles(xml, vocab) {
   const out = [];
   const nodeCounts = new Map();
+  const plan = planHeroHeights(xml, vocab);
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)\s*\/?>/g;
   let m;
   while ((m = elRe.exec(xml))) {
@@ -2651,16 +2723,17 @@ function scanUnsupportedStyles(xml, vocab) {
     nodeCounts.set(m[1], nodeIndex);
     const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
     while ((a = aRe.exec(m[2]))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
-    for (const finding of styleFieldFindings(attrs, raw, vocab)) out.push({ node: m[1], nodeIndex, ...finding });
+    const ctx = { heroItem: plan.items.get(m.index) || null, heroParent: plan.parents.get(m.index) || null };
+    for (const finding of styleFieldFindings(attrs, raw, vocab, ctx)) out.push({ node: m[1], nodeIndex, ...finding });
   }
   return out;
 }
 
 // Subclassification for review: one group per issue type, block and property/class set.
-const STYLE_ISSUE_ORDER = ['single-select-conflict', 'move-target-undeclared', 'cta-default-redundant', 'class-move', 'unsupported-class', 'undeclared-field'];
+const STYLE_ISSUE_ORDER = ['single-select-conflict', 'hero-height-manual', 'move-target-undeclared', 'cta-default-redundant', 'hero-height-move', 'class-move', 'unsupported-class', 'undeclared-field'];
 
 function styleGroupLabel(finding) {
-  if (['unsupported-class', 'class-move', 'move-target-undeclared'].includes(finding.issue)) return finding.unsupported.join(', ');
+  if (['unsupported-class', 'class-move', 'move-target-undeclared', 'hero-height-move', 'hero-height-manual'].includes(finding.issue)) return finding.unsupported.join(', ');
   if (finding.issue === 'single-select-conflict') return `${finding.group}: ${finding.selected.join(', ')}`;
   return '';
 }
@@ -2703,14 +2776,16 @@ function collectStyleConflicts(buffer, vocab) {
 function qaFixUnsupportedStyles(xml, vocab, selections = new Map(), file = '') {
   const changes = [], conflicts = [], manual = [];
   const nodeCounts = new Map();
+  const plan = planHeroHeights(xml, vocab);
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
   const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const result = xml.replace(elRe, (full, node, attrStr, tail) => {
+  const result = xml.replace(elRe, (full, node, attrStr, tail, offset) => {
     const nodeIndex = (nodeCounts.get(node) || 0) + 1;
     nodeCounts.set(node, nodeIndex);
     const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
     while ((a = aRe.exec(attrStr))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
-    const findings = styleFieldFindings(attrs, raw, vocab);
+    const heroParent = plan.parents.get(offset) || null;
+    const findings = styleFieldFindings(attrs, raw, vocab, { heroItem: plan.items.get(offset) || null, heroParent });
     let out = attrStr;
     for (const finding of findings) {
       if (finding.issue === 'single-select-conflict') {
@@ -2729,13 +2804,13 @@ function qaFixUnsupportedStyles(xml, vocab, selections = new Map(), file = '') {
       } else if (finding.issue === 'undeclared-field') {
         out = out.replace(new RegExp('\\s+' + escRe(finding.prop) + '="[^"]*"'), '');
         changes.push({ node, block: finding.block, prop: finding.prop, removedField: true, oldValue: finding.value });
-      } else if (finding.issue === 'move-target-undeclared') {
+      } else if (finding.issue === 'move-target-undeclared' || finding.issue === 'hero-height-manual') {
         manual.push({ node, nodeIndex, ...finding });
       } else {
         const value = finding.replacementValue;
         out = out.replace(new RegExp('(\\s' + escRe(finding.prop) + '=")[^"]*(")'), (_, pre, post) => pre + xmlAttrEscape(value) + post);
         attrs[finding.prop.toLowerCase()] = value;
-        if (finding.issue === 'class-move') {
+        if (finding.moved && finding.moved.length) {
           const targetLn = finding.target.toLowerCase();
           const targetValue = xmlAttrEscape(finding.mergedValue);
           if (attrs[targetLn] !== undefined)
@@ -2745,15 +2820,60 @@ function qaFixUnsupportedStyles(xml, vocab, selections = new Map(), file = '') {
           attrs[targetLn] = finding.mergedValue;
         }
         changes.push({
-          node, block: finding.block, prop: finding.prop, removed: finding.dropped || finding.unsupported, value,
+          node, nodeIndex, block: finding.block, prop: finding.prop, removed: finding.dropped || finding.unsupported, value,
           moved: finding.moved || [], movedTo: finding.target, targetValue: finding.mergedValue,
+          heightMoved: finding.heightMoved || [],
           ctaDefaultRemoved: finding.issue === 'cta-default-redundant',
         });
       }
     }
-    return findings.length ? `<${node}${out}${tail}>` : full;
+    let touched = findings.length > 0;
+    if (heroParent) {
+      const dynLn = 'classes_customdynamicclass';
+      const existing = attrs[dynLn];
+      const tokens = parseStyleList(existing);
+      const groupOptions = new Set(heroParent.groupOptions);
+      const value = tokens.filter(token => !groupOptions.has(token) || token === heroParent.height);
+      const replaced = tokens.filter(token => groupOptions.has(token) && token !== heroParent.height);
+      if (!value.includes(heroParent.height)) value.push(heroParent.height);
+      if (value.join(',') !== tokens.join(',')) {
+        const rawName = raw[dynLn] || 'classes_customDynamicClass';
+        if (existing !== undefined)
+          out = out.replace(new RegExp('(\\s' + escRe(rawName) + '=")[^"]*(")'), (_, pre, post) => pre + xmlAttrEscape(value.join(',')) + post);
+        else
+          out += ` ${rawName}="${xmlAttrEscape(value.join(','))}"`;
+        attrs[dynLn] = value.join(',');
+        touched = true;
+        changes.push({ node, nodeIndex, block: HERO_PARENT_ID, prop: rawName, heroParent: true, height: heroParent.height, replaced, oldValue: existing || '', value: value.join(',') });
+      }
+    }
+    return touched ? `<${node}${out}${tail}>` : full;
   });
   return { result, changes, conflicts, manual };
+}
+
+// Report row for one applied style change.
+function styleChangeRow(file, ch) {
+  const type = ch.heroParent ? 'hero-height-parent'
+    : ch.resolvedGroup ? 'single-select-style-resolution'
+    : ch.ctaDefaultRemoved ? 'cta-default-cleanup'
+    : ch.heightMoved && ch.heightMoved.length ? 'hero-height-move'
+    : ch.moved && ch.moved.length ? 'style-class-move'
+    : 'unsupported-style';
+  const oldUrl = ch.heroParent ? `${ch.prop}="${ch.oldValue}"`
+    : ch.removedField ? `${ch.prop}="${ch.oldValue}"`
+    : `${ch.prop}: ${[...(ch.heightMoved || []), ...(ch.moved || []), ...(ch.removed || [])].join(',')}`;
+  const extras = [];
+  if (ch.heightMoved && ch.heightMoved.length) extras.push(`moved ${ch.heightMoved.join(',')} to the parent hero-container`);
+  if (ch.moved && ch.moved.length) extras.push(`moved ${ch.moved.join(',')} to ${ch.movedTo}`);
+  if (ch.removed && ch.removed.length && extras.length) extras.push(`removed ${ch.removed.join(',')}`);
+  const newUrl = ch.heroParent ? `${ch.prop}="${ch.value}" (height ${ch.height} moved from hero-container-item${ch.replaced.length ? `; replaced ${ch.replaced.join(',')}` : ''})`
+    : ch.removedField ? `${ch.prop} removed (not declared in modelFields)`
+    : ch.resolvedGroup ? `${ch.node} #${ch.nodeIndex} ${ch.prop}="${ch.value}" (kept ${ch.kept} for group "${ch.resolvedGroup}")`
+    : ch.ctaDefaultRemoved ? `${ch.prop}="${ch.value}" (default-cta removed because back-cta is present)`
+    : extras.length ? `${ch.prop}="${ch.value}"${ch.moved && ch.moved.length ? `; ${ch.movedTo}="${ch.targetValue}"` : ''} (${extras.join('; ')})`
+    : `${ch.prop}="${ch.value}" (unsupported classes removed)`;
+  return { file, type, oldUrl, newUrl };
 }
 
 // ── Missing robots tags ────────────────────────────────────────────────────────
@@ -2863,15 +2983,7 @@ async function buildQaFixedZip(buffer, opts) {
           for (const ch of al.changes) changes.push({ file, type: 'alt-text', oldUrl: ch.value, newUrl: `${ch.altProp}="${ch.alt}"` });
           for (const ch of cp.changes) changes.push({ file, type: 'caption',  oldUrl: ch.value, newUrl: `caption="${ch.caption}"` });
           for (const ch of a.changes) changes.push({ file, type: 'absolute',     ...ch });
-          for (const ch of st.changes) changes.push({
-            file, type: ch.resolvedGroup ? 'single-select-style-resolution' : ch.ctaDefaultRemoved ? 'cta-default-cleanup' : ch.moved && ch.moved.length ? 'style-class-move' : 'unsupported-style',
-            oldUrl: ch.removedField ? `${ch.prop}="${ch.oldValue}"` : `${ch.prop}: ${[...(ch.moved || []), ...(ch.removed || [])].join(',')}`,
-            newUrl: ch.removedField ? `${ch.prop} removed (not declared in modelFields)`
-              : ch.resolvedGroup ? `${ch.node} #${ch.nodeIndex} ${ch.prop}="${ch.value}" (kept ${ch.kept} for group "${ch.resolvedGroup}")`
-              : ch.ctaDefaultRemoved ? `${ch.prop}="${ch.value}" (default-cta removed because back-cta is present)`
-              : ch.moved && ch.moved.length ? `${ch.prop}="${ch.value}"; ${ch.movedTo}="${ch.targetValue}" (moved ${ch.moved.join(',')} to ${ch.movedTo}${ch.removed.length ? `; removed ${ch.removed.join(',')}` : ''})`
-              : `${ch.prop}="${ch.value}" (unsupported classes removed)`,
-          });
+          for (const ch of st.changes) changes.push(styleChangeRow(file, ch));
           for (const conflict of st.conflicts) styleConflicts.push({ file, ...conflict });
           for (const item of st.manual) styleManual.push({ file, ...item });
           for (const ch of rob.changes) changes.push({ file, type: 'robots-tags', oldUrl: '(missing)', newUrl: `cq:robotsTags="[${ch.value}]"` });
@@ -3062,10 +3174,10 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
       newUrl: `Single-select group "${conflict.group}": choose one option`,
     });
     for (const item of styleManual) reportRows.push({
-      file: item.file, type: 'style-class-move-blocked',
+      file: item.file, type: item.issue === 'hero-height-manual' ? 'hero-height-blocked' : 'style-class-move-blocked',
       status: 'manual review (class retained)',
       oldUrl: `${item.node} [${item.block}] ${item.prop}: ${item.unsupported.join(',')}`,
-      newUrl: `${item.target} is not declared in modelFields; move the class manually`,
+      newUrl: item.reason,
     });
     for (const [reason, assets] of altSkips) for (const asset of assets)
       reportRows.push({ file: '', type: 'alt-text', status: reason, oldUrl: asset, newUrl: '' });
@@ -3086,6 +3198,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
     res.setHeader('X-Style-Conflicts', String(styleConflicts.length));
     res.setHeader('X-Style-Manual', String(styleManual.length));
     res.setHeader('X-Style-Moved', String(counts['style-class-move'] || 0));
+    res.setHeader('X-Hero-Height-Moved', String(counts['hero-height-move'] || 0));
     res.setHeader('X-Style-Resolved', String(counts['single-select-style-resolution'] || 0));
     res.setHeader('X-Alt-Skipped',  String([...altSkips.values()].reduce((sum, assets) => sum + assets.size, 0)));
     res.setHeader('X-Recovered',    String(recoveredPaths.size));
