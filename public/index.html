@@ -897,17 +897,14 @@
         <div class="card-body lc-collapse" id="lcBrokenBody"><div class="text-muted small">Not run yet.</div></div>
       </div>
 
-      <!-- accessibility findings and DAM metadata refresh -->
-      <div class="card mb-3" id="lcA11yCard" style="display:none;border-left:4px solid #0dcaf0">
+      <!-- image alt text refresh from DAM metadata -->
+      <div class="card mb-3" id="lcAltCard" style="border-left:4px solid #198754">
         <div class="card-header d-flex align-items-center gap-2 flex-wrap">
-          <i class="bi bi-universal-access text-info"></i><strong>Accessibility</strong>
-          <span class="badge bg-info ms-1" id="lcA11yCount">0</span>
-          <span class="text-muted small ms-1">— DAM description → title replaces existing image alt text, including preview package pages. If both are missing, authored alt is kept; filename fallback only fills empty/missing alt. Decorative images are skipped; failed lookups retain existing text. Other findings may need manual fixes.</span>
+          <i class="bi bi-image text-success"></i><strong>Image alt text</strong>
+          <span class="text-muted small ms-1">— DAM description → title replaces existing image alt text, including preview package pages. If both are missing, authored alt is kept; filename fallback only fills empty/missing alt. Decorative images are skipped; failed lookups retain existing text.</span>
           <button class="btn btn-sm btn-outline-success ms-auto" id="lcFillAltBtn" onclick="lcFixAlt()" title="Refresh from DAM description/title; retain authored alt if neither exists, otherwise fill empty/missing alt from the filename"><i class="bi bi-magic me-1"></i>Refresh alt text</button>
-          <button type="button" class="btn btn-sm btn-link text-muted p-0 ms-1" title="Collapse / expand" onclick="lcToggleCard(this)"><i class="bi bi-chevron-up"></i></button>
           <div id="lcAltStatus" class="small w-100 mt-1"></div>
         </div>
-        <div class="card-body lc-collapse" id="lcA11yBody"></div>
       </div>
 
       <!-- unsupported dynamic classes and undeclared style fields -->
@@ -915,7 +912,7 @@
         <div class="card-header d-flex align-items-center gap-2 flex-wrap">
           <i class="bi bi-palette text-danger"></i><strong>Unsupported styles</strong>
           <span class="badge bg-danger ms-1" id="lcStylesCount">0</span>
-          <span class="text-muted small ms-1">— Fix drops non-picklist classes from <code>*_customDynamicClass</code> and removes class/style fields (<code>classes</code>, <code>classes_*</code>, <code>style</code>, <code>style_*</code>, <code>cq:styleIds</code>) absent from the node's <code>modelFields</code>. Declared free-form fields are preserved. Without <code>modelFields</code>, field removal is skipped. CTA-only exception: when <code>back-cta</code> and <code>default-cta</code> coexist, Fix automatically removes <code>default-cta</code>. For other single-select conflicts, choose the class to keep below; Fix and Fix all apply your choices. Unchosen conflicts stay unchanged.</span>
+          <span class="text-muted small ms-1">— Fix drops non-picklist classes from <code>*_customDynamicClass</code>, except <code>body-unica-*</code> classes, which are moved (comma-appended) into the matching <code>*_commonCustomClass</code>; if that field isn't in <code>modelFields</code>, the class is left for manual review. It also removes class/style fields (<code>classes</code>, <code>classes_*</code>, <code>style</code>, <code>style_*</code>, <code>cq:styleIds</code>) absent from the node's <code>modelFields</code>. Declared free-form fields are preserved. Without <code>modelFields</code>, field removal is skipped. CTA-only exception: when <code>back-cta</code> and <code>default-cta</code> coexist, Fix automatically removes <code>default-cta</code>. For other single-select conflicts, choose the class to keep below; Fix and Fix all apply your choices. Unchosen conflicts stay unchanged. Findings are grouped by issue type, block and property/class: use the chips and filter box, and expand a group to see its pages and nodes.</span>
           <button class="btn btn-sm btn-outline-success ms-auto" id="lcStylesFixBtn" onclick="lcFix(['styles'])"><i class="bi bi-magic me-1"></i>Fix</button>
           <button type="button" class="btn btn-sm btn-link text-muted p-0 ms-1" title="Collapse / expand" onclick="lcToggleCard(this)"><i class="bi bi-chevron-up"></i></button>
         </div>
@@ -1361,8 +1358,8 @@
                     <li>Only Franklin pages are checked. <code>META-INF</code>, <code>filter.xml</code>, redirects/config nodes and XML namespaces are excluded.</li>
                     <li>Content fragments and full cross-locale <code>/content/</code> links are recognised and left untouched (cross-locale links are listed for review).</li>
                     <li>Per-category fixes stack: fix one type, re-scan, fix another. Nothing changes unless it matches.</li>
-                    <li><em>Refresh alt text</em> and <em>Fix all</em> replace supported component image alt values from DAM <code>dc:description</code> → <code>dc:title</code>, even when already populated. If both are missing, existing authored alt is retained; filename fallback only fills empty/missing alt. Decorative images are skipped; failed lookups retain existing text and are reported. Rich-text image alt findings still need manual fixes.</li>
-                    <li>Alt refresh remains available with no accessibility findings. Caption filling is currently disabled.</li>
+                    <li><em>Refresh alt text</em> and <em>Fix all</em> replace supported component image alt values from DAM <code>dc:description</code> → <code>dc:title</code>, even when already populated. If both are missing, existing authored alt is retained; filename fallback only fills empty/missing alt. Decorative images are skipped; failed lookups retain existing text and are reported.</li>
+                    <li>Alt refresh is a separate action on the <em>Image alt text</em> card; the Link Checker no longer reports accessibility findings. Caption filling is currently disabled. Rich-text <code>&lt;img alt&gt;</code> values are not rewritten.</li>
                     <li>For Brightcove blocks (<code>brightcove</code>, <code>brightcove-video</code> or <code>custom-brightcove</code> component/model), <code>posterImage</code> uses <code>posterAccessibilityLabel</code>. Other blocks retain the normal <code>&lt;imageProperty&gt;Alt</code> naming.</li>
                     <li>Preview package pages are included in explicit alt refresh, including <em>Fix all</em>. They remain excluded from ordinary QA scans and other fixes; drafts, config and navigation content remain excluded from alt refresh too.</li>
                   </ul>

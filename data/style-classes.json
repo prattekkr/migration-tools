@@ -1,7 +1,7 @@
 {
   "_comment": "Per-block picklist classes and groups from <config>/*-picklist-config. Group names and option labels come from Style Name. Select Multiple defaults to false when absent; a group is multi-select if any option enables it, and each option retains its setting. Regenerate via Refresh style vocabulary.",
   "schemaVersion": 2,
-  "generatedAt": "2026-10-07T07:16:17.516Z",
+  "generatedAt": "2026-10-14T14:59:18.351Z",
   "source": "/content/abbvie-nextgen-eds/corporate/abbvie-com/config",
   "blocks": {
     "image": {
@@ -1014,6 +1014,8 @@
     "cta": {
       "classes": [
         "back-cta",
+        "bold-weight",
+        "book-weight",
         "dark-theme",
         "default-cta",
         "external-cta",
@@ -1022,10 +1024,12 @@
         "full-width",
         "internal-cta",
         "light-theme",
+        "light-weight",
         "ot-sdk-show-settings",
         "popup-agree",
         "popup-close",
         "popup-disagree",
+        "regular-weight",
         "width-large",
         "width-medium",
         "width-small",
@@ -1179,6 +1183,32 @@
             {
               "label": "Right",
               "value": "float-right",
+              "selectMultiple": false
+            }
+          ]
+        },
+        {
+          "name": "Font Weight",
+          "selectMultiple": false,
+          "options": [
+            {
+              "label": "Regular",
+              "value": "regular-weight",
+              "selectMultiple": false
+            },
+            {
+              "label": "Light",
+              "value": "light-weight",
+              "selectMultiple": false
+            },
+            {
+              "label": "Book",
+              "value": "book-weight",
+              "selectMultiple": false
+            },
+            {
+              "label": "Bold",
+              "value": "bold-weight",
               "selectMultiple": false
             }
           ]
@@ -1635,7 +1665,7 @@
         "align-left",
         "align-right",
         "anchor-link",
-        "anchor-link--multiple",
+        "anchor-link-multiple",
         "compact-padding",
         "dark-theme",
         "description",
@@ -1824,7 +1854,7 @@
             },
             {
               "label": "Multiple Anchor Links",
-              "value": "anchor-link--multiple",
+              "value": "anchor-link-multiple",
               "selectMultiple": false
             }
           ]
@@ -3198,7 +3228,7 @@
             {
               "label": "Section Margin",
               "value": "section-margin",
-              "selectMultiple": false
+              "selectMultiple": true
             }
           ]
         },
@@ -3903,6 +3933,7 @@
         "cols-1-4",
         "cols-1-4-1-5",
         "cols-1-5-1-4-1",
+        "cols-1-5-5-1",
         "cols-1-6-1-3",
         "cols-1-6-5-1",
         "cols-1-7-4",
@@ -4230,6 +4261,11 @@
             {
               "label": "7-2-3",
               "value": "cols-7-2-3",
+              "selectMultiple": false
+            },
+            {
+              "label": "1-5-5-1",
+              "value": "cols-1-5-5-1",
               "selectMultiple": false
             }
           ]

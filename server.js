@@ -2229,11 +2229,11 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
       damNorm   = { correctRoot: se?.damRoot || '/content/dam/corporate/abbvie-com2', oldRoots: ['/content/dam/abbvie-com', '/content/dam/abbvie-com2'] };
     }
     const unresolvedAssets = new Map();   // ref -> { current, check, verdict, count }
-    const a11yAgg = new Map();            // issue|node -> { node, issue, prop, count, files:Set, samples:[] }
     const styleVocab = loadStyleVocab();
     const stylesAgg = mk();               // unsupported dynamic-picklist style classes
     let styleConflictCount = 0;
     const styleConflicts = [];
+    const styleGroups = new Map();        // issue|block|prop|label -> grouped findings for manual review
     const robotsMap = loadRobotsMap();
     const robotsAgg = mk();               // pages missing a cq:robotsTags the CSV says they should have
 
@@ -2280,15 +2280,13 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
         }
       }
 
-      for (const f of qaAccessibility(region)) {
-        const key = f.issue + '|' + f.node;
-        if (!a11yAgg.has(key)) a11yAgg.set(key, { node: f.node, issue: f.issue, prop: f.prop, count: 0, files: new Set(), samples: [] });
-        const a = a11yAgg.get(key); a.count++; a.files.add(file);
-        if (a.samples.length < 10 && !a.samples.some(s => s.page === file && s.value === f.value))
-          a.samples.push({ page: file, asset: f.asset, prop: f.prop, value: f.value });
-      }
-
       for (const s of scanUnsupportedStyles(region, styleVocab)) {
+        const groupKey = styleGroupLabel(s);
+        const gk = [s.issue, s.block, s.prop, groupKey].join('|');
+        if (!styleGroups.has(gk)) styleGroups.set(gk, { issue: s.issue, block: s.block, prop: s.prop, label: groupKey, count: 0, files: new Set(), items: [] });
+        const sg = styleGroups.get(gk);
+        sg.count++; sg.files.add(file);
+        sg.items.push({ file, node: s.node, nodeIndex: s.nodeIndex, value: s.value });
         if (s.issue === 'single-select-conflict') {
           styleConflictCount++;
           const conflict = { file, ...s };
@@ -2297,6 +2295,10 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
         } else {
           addEx(stylesAgg, file, s.issue === 'undeclared-field'
             ? `${s.node} [${s.block}] ${s.prop}: not declared in modelFields`
+            : s.issue === 'class-move'
+              ? `${s.node} [${s.block}] ${s.prop}: ${s.moved.join(', ')} → ${s.target}${s.dropped.length ? `; drops ${s.dropped.join(', ')}` : ''}`
+            : s.issue === 'move-target-undeclared'
+              ? `${s.node} [${s.block}] ${s.prop}: ${s.target} is not declared in modelFields; ${s.unsupported.join(', ')} cannot be moved (manual review)`
             : s.issue === 'cta-default-redundant'
               ? `${s.node} [${s.block}] ${s.prop}: back-cta is present; auto-fix removes default-cta`
             : `${s.node} [${s.block}] ${s.prop}: ${s.unsupported.join(', ')}`);
@@ -2311,12 +2313,8 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
       }
     }
 
-    const a11yOrder = { 'missing alt text': 0, 'empty alt text': 1, 'control has no accessible label': 2, 'missing caption': 3, 'empty caption': 4, 'vague link text': 5 };
-    const accessibility = [...a11yAgg.values()]
-      .map(a => ({ node: a.node, issue: a.issue, prop: a.prop, count: a.count, files: a.files.size, samples: a.samples }))
-      .sort((a, b) => (a11yOrder[a.issue] ?? 9) - (a11yOrder[b.issue] ?? 9) || b.count - a.count);
-
     const pack = c => ({ count: c.count, files: c.files.size, examples: c.examples });
+    const styleGroupList = styleGroupsToList(styleGroups);
 
     const crossGroupsArr = [...crossGroups.entries()].map(([sourceRoot, c]) => ({
       sourceRoot,
@@ -2346,8 +2344,11 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
         .sort((a, b) => b.count - a.count),
       crossLocale: { count: crossCount, files: crossFilesSet.size, groups: crossGroupsArr, unresolved: pack(crossUnresolved) },
       unresolvedAssets: [...unresolvedAssets.values()].sort((a, b) => b.count - a.count),
-      accessibility,
-      unsupportedStyles: { ...pack(stylesAgg), singleSelectConflicts: styleConflictCount, conflicts: styleConflicts },
+      unsupportedStyles: {
+        ...pack(stylesAgg), singleSelectConflicts: styleConflictCount, conflicts: styleConflicts,
+        categories: styleCategorySummary(styleGroupList),
+        groups: styleGroupList,
+      },
       missingRobots: pack(robotsAgg),
     });
   } catch (err) {
@@ -2580,6 +2581,10 @@ function styleConfigKey(attrs, vocab) {
   return null;
 }
 
+// Non-picklist classes matching these patterns are moved to *_commonCustomClass, not dropped.
+const STYLE_MOVE_PATTERNS = [/^body-unica-/];
+const isMovableStyleClass = token => STYLE_MOVE_PATTERNS.some(pattern => pattern.test(token));
+
 function styleFieldFindings(attrs, raw, vocab) {
   const key = styleConfigKey(attrs, vocab);
   const block = key || attrs.auecomponentid || attrs.model || '(unknown block)';
@@ -2596,10 +2601,24 @@ function styleFieldFindings(attrs, raw, vocab) {
     if (!allowed || !/_customdynamicclass$/.test(ln)) continue;
     const tokens = attrs[ln].split(',').map(t => t.trim()).filter(Boolean);
     const unsupported = tokens.filter(t => !allowed.has(t));
-    if (unsupported.length) findings.push({
-      block, prop: raw[ln], issue: 'unsupported-class', value: attrs[ln], unsupported,
-      replacementValue: tokens.filter(t => allowed.has(t)).join(','),
-    });
+    if (unsupported.length) {
+      const movable = unsupported.filter(isMovableStyleClass);
+      const targetLn = ln.replace(/customdynamicclass$/, 'commoncustomclass');
+      const target = raw[targetLn] || raw[ln].replace(/customDynamicClass$/i, 'commonCustomClass');
+      const blocked = movable.length > 0 && fields !== null && !fields.has(targetLn);   // target would be removed as undeclared next scan
+      const moved = blocked ? [] : movable;
+      const dropped = unsupported.filter(t => !movable.includes(t));
+      if (blocked) findings.push({ block, prop: raw[ln], issue: 'move-target-undeclared', value: attrs[ln], unsupported: movable, target });
+      if (moved.length || dropped.length) {
+        const existing = (attrs[targetLn] || '').split(',').map(t => t.trim()).filter(Boolean);
+        findings.push({
+          block, prop: raw[ln], issue: moved.length ? 'class-move' : 'unsupported-class', value: attrs[ln],
+          unsupported: [...moved, ...dropped], moved, dropped, target,
+          mergedValue: [...new Set([...existing, ...moved])].join(','),
+          replacementValue: tokens.filter(t => allowed.has(t) || (blocked && movable.includes(t))).join(','),
+        });
+      }
+    }
     const preferBackCta = key === 'cta' && tokens.includes('back-cta') && tokens.includes('default-cta');
     if (preferBackCta) findings.push({
       block, prop: raw[ln], issue: 'cta-default-redundant', value: attrs[ln],
@@ -2637,6 +2656,28 @@ function scanUnsupportedStyles(xml, vocab) {
   return out;
 }
 
+// Subclassification for review: one group per issue type, block and property/class set.
+const STYLE_ISSUE_ORDER = ['single-select-conflict', 'move-target-undeclared', 'cta-default-redundant', 'class-move', 'unsupported-class', 'undeclared-field'];
+
+function styleGroupLabel(finding) {
+  if (['unsupported-class', 'class-move', 'move-target-undeclared'].includes(finding.issue)) return finding.unsupported.join(', ');
+  if (finding.issue === 'single-select-conflict') return `${finding.group}: ${finding.selected.join(', ')}`;
+  return '';
+}
+
+function styleGroupsToList(groups) {
+  const rank = issue => { const i = STYLE_ISSUE_ORDER.indexOf(issue); return i < 0 ? STYLE_ISSUE_ORDER.length : i; };
+  return [...groups.values()]
+    .sort((a, b) => rank(a.issue) - rank(b.issue) || b.count - a.count || a.block.localeCompare(b.block) || a.prop.localeCompare(b.prop) || a.label.localeCompare(b.label))
+    .map(g => ({ issue: g.issue, block: g.block, prop: g.prop, label: g.label, count: g.count, files: g.files.size, items: g.items }));
+}
+
+function styleCategorySummary(groupList) {
+  const out = {};
+  for (const g of groupList) out[g.issue] = (out[g.issue] || 0) + g.count;
+  return out;
+}
+
 function styleConflictKey({ file, node, nodeIndex, prop, group }) {
   return JSON.stringify([file, node, nodeIndex, prop, group]);
 }
@@ -2657,9 +2698,10 @@ function collectStyleConflicts(buffer, vocab) {
   return conflicts;
 }
 
-// CTA back-cta wins over default-cta; other single-select conflicts need explicit choices.
+// CTA back-cta wins over default-cta; body-unica-* classes move to *_commonCustomClass;
+// other single-select conflicts need explicit choices.
 function qaFixUnsupportedStyles(xml, vocab, selections = new Map(), file = '') {
-  const changes = [], conflicts = [];
+  const changes = [], conflicts = [], manual = [];
   const nodeCounts = new Map();
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
   const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -2687,16 +2729,31 @@ function qaFixUnsupportedStyles(xml, vocab, selections = new Map(), file = '') {
       } else if (finding.issue === 'undeclared-field') {
         out = out.replace(new RegExp('\\s+' + escRe(finding.prop) + '="[^"]*"'), '');
         changes.push({ node, block: finding.block, prop: finding.prop, removedField: true, oldValue: finding.value });
+      } else if (finding.issue === 'move-target-undeclared') {
+        manual.push({ node, nodeIndex, ...finding });
       } else {
         const value = finding.replacementValue;
         out = out.replace(new RegExp('(\\s' + escRe(finding.prop) + '=")[^"]*(")'), (_, pre, post) => pre + xmlAttrEscape(value) + post);
         attrs[finding.prop.toLowerCase()] = value;
-        changes.push({ node, block: finding.block, prop: finding.prop, removed: finding.unsupported, value, ctaDefaultRemoved: finding.issue === 'cta-default-redundant' });
+        if (finding.issue === 'class-move') {
+          const targetLn = finding.target.toLowerCase();
+          const targetValue = xmlAttrEscape(finding.mergedValue);
+          if (attrs[targetLn] !== undefined)
+            out = out.replace(new RegExp('(\\s' + escRe(finding.target) + '=")[^"]*(")'), (_, pre, post) => pre + targetValue + post);
+          else
+            out += ` ${finding.target}="${targetValue}"`;
+          attrs[targetLn] = finding.mergedValue;
+        }
+        changes.push({
+          node, block: finding.block, prop: finding.prop, removed: finding.dropped || finding.unsupported, value,
+          moved: finding.moved || [], movedTo: finding.target, targetValue: finding.mergedValue,
+          ctaDefaultRemoved: finding.issue === 'cta-default-redundant',
+        });
       }
     }
     return findings.length ? `<${node}${out}${tail}>` : full;
   });
-  return { result, changes, conflicts };
+  return { result, changes, conflicts, manual };
 }
 
 // ── Missing robots tags ────────────────────────────────────────────────────────
@@ -2776,7 +2833,7 @@ async function buildQaFixedZip(buffer, opts) {
   const customMap  = new Map((opts.customAssetMappings || []).filter(m => m && m.from && m.to).map(m => [m.from, m.to]));
   const outerAdm   = new AdmZip(buffer);
   const innerEntry = outerAdm.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
-  const changes = [], unmatched = [], styleConflicts = [];
+  const changes = [], unmatched = [], styleConflicts = [], styleManual = [];
   let pagesFixed = 0;
 
   async function patch(adm) {
@@ -2799,7 +2856,7 @@ async function buildQaFixedZip(buffer, opts) {
           const c = qaPage && sel.has('shortPath') ? qaFixShortPaths(body, siteRoot) : { result: body, changes: [] }; body = c.result;
           const pageLocale = qaLocaleRootOf(file, siteRoot);
           const x = (qaPage && sel.has('crossLocale') && crossLocaleMappings?.length) ? qaFixCrossLocale(body, crossLocaleMappings, pageLocale) : { result: body, changes: [] }; body = x.result;
-          const st = qaPage && doStyles ? qaFixUnsupportedStyles(body, styleVocab, opts.styleSelections, file) : { result: body, changes: [], conflicts: [] }; body = st.result;
+          const st = qaPage && doStyles ? qaFixUnsupportedStyles(body, styleVocab, opts.styleSelections, file) : { result: body, changes: [], conflicts: [], manual: [] }; body = st.result;
           body = unmaskProtected(body, protectedVals);   // restore cq:template/tags/MSM refs before writing back
           const rob = qaPage && doRobots ? qaFixRobotsTags(pre + body + post, robotsPagePath(file), robotsMap) : { result: pre + body + post, changes: [] };
           const after = qaPage ? sanitizeXmlEntities(normalizeDeliveryUrls(rob.result)) : rob.result;
@@ -2807,14 +2864,16 @@ async function buildQaFixedZip(buffer, opts) {
           for (const ch of cp.changes) changes.push({ file, type: 'caption',  oldUrl: ch.value, newUrl: `caption="${ch.caption}"` });
           for (const ch of a.changes) changes.push({ file, type: 'absolute',     ...ch });
           for (const ch of st.changes) changes.push({
-            file, type: ch.resolvedGroup ? 'single-select-style-resolution' : ch.ctaDefaultRemoved ? 'cta-default-cleanup' : 'unsupported-style',
-            oldUrl: ch.removedField ? `${ch.prop}="${ch.oldValue}"` : `${ch.prop}: ${ch.removed.join(',')}`,
+            file, type: ch.resolvedGroup ? 'single-select-style-resolution' : ch.ctaDefaultRemoved ? 'cta-default-cleanup' : ch.moved && ch.moved.length ? 'style-class-move' : 'unsupported-style',
+            oldUrl: ch.removedField ? `${ch.prop}="${ch.oldValue}"` : `${ch.prop}: ${[...(ch.moved || []), ...(ch.removed || [])].join(',')}`,
             newUrl: ch.removedField ? `${ch.prop} removed (not declared in modelFields)`
               : ch.resolvedGroup ? `${ch.node} #${ch.nodeIndex} ${ch.prop}="${ch.value}" (kept ${ch.kept} for group "${ch.resolvedGroup}")`
               : ch.ctaDefaultRemoved ? `${ch.prop}="${ch.value}" (default-cta removed because back-cta is present)`
+              : ch.moved && ch.moved.length ? `${ch.prop}="${ch.value}"; ${ch.movedTo}="${ch.targetValue}" (moved ${ch.moved.join(',')} to ${ch.movedTo}${ch.removed.length ? `; removed ${ch.removed.join(',')}` : ''})`
               : `${ch.prop}="${ch.value}" (unsupported classes removed)`,
           });
           for (const conflict of st.conflicts) styleConflicts.push({ file, ...conflict });
+          for (const item of st.manual) styleManual.push({ file, ...item });
           for (const ch of rob.changes) changes.push({ file, type: 'robots-tags', oldUrl: '(missing)', newUrl: `cq:robotsTags="[${ch.value}]"` });
           for (const ch of b.changes) changes.push({ file, type: 'asset-dm',     ...ch });
           for (const ch of c.changes) changes.push({ file, type: 'short-path',   ...ch });
@@ -2837,9 +2896,9 @@ async function buildQaFixedZip(buffer, opts) {
       if (e.isDirectory) continue;
       outerJsz.file(e.entryName, e.entryName === innerEntry.entryName ? patchedInner : e.getData());
     }
-    return { buf: await outerJsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), changes, unmatched, pagesFixed, styleConflicts };
+    return { buf: await outerJsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), changes, unmatched, pagesFixed, styleConflicts, styleManual };
   }
-  return { buf: await patch(outerAdm), changes, unmatched, pagesFixed, styleConflicts };
+  return { buf: await patch(outerAdm), changes, unmatched, pagesFixed, styleConflicts, styleManual };
 }
 
 // Pre-scan pass for the Fix flow: walks the Franklin pages (same inner/outer zip
@@ -2979,7 +3038,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
       if (host && sel.has('caption')) captionByValue = (await computeCaptionFills(buffer, uuidToRow, damNorm, hostCfg, !!overwrite)).captionByValue;
     }
 
-    const { buf, changes, unmatched, pagesFixed, styleConflicts } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue, captionByValue, overwriteCaptions: !!overwrite, styleSelections });
+    const { buf, changes, unmatched, pagesFixed, styleConflicts, styleManual } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue, captionByValue, overwriteCaptions: !!overwrite, styleSelections });
     lcSessions.set(sessionId, buf);   // keep session, chained on the fixed result (enables per-category iteration + re-scan)
 
     // Persist author-supplied asset mappings into every environment's asset-map CSV (per-env host),
@@ -3002,6 +3061,12 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
       oldUrl: `${conflict.node} [${conflict.block}] ${conflict.prop}: ${conflict.selected.join(',')}`,
       newUrl: `Single-select group "${conflict.group}": choose one option`,
     });
+    for (const item of styleManual) reportRows.push({
+      file: item.file, type: 'style-class-move-blocked',
+      status: 'manual review (class retained)',
+      oldUrl: `${item.node} [${item.block}] ${item.prop}: ${item.unsupported.join(',')}`,
+      newUrl: `${item.target} is not declared in modelFields; move the class manually`,
+    });
     for (const [reason, assets] of altSkips) for (const asset of assets)
       reportRows.push({ file: '', type: 'alt-text', status: reason, oldUrl: asset, newUrl: '' });
     const reportCsv = stringify(reportRows, { header: true, columns: [
@@ -3019,6 +3084,8 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
     res.setHeader('X-Change-Count', String(changes.length));
     res.setHeader('X-Unmatched',    String(unmatched.length));
     res.setHeader('X-Style-Conflicts', String(styleConflicts.length));
+    res.setHeader('X-Style-Manual', String(styleManual.length));
+    res.setHeader('X-Style-Moved', String(counts['style-class-move'] || 0));
     res.setHeader('X-Style-Resolved', String(counts['single-select-style-resolution'] || 0));
     res.setHeader('X-Alt-Skipped',  String([...altSkips.values()].reduce((sum, assets) => sum + assets.size, 0)));
     res.setHeader('X-Recovered',    String(recoveredPaths.size));
@@ -3205,7 +3272,7 @@ function qaResolveLink(url, ctx) {
   return null;   // internal-ok / other → correct or not a reportable reference
 }
 
-// Image / alt property names + asset-value test, shared by the a11y scan and the alt-text fixer.
+// Image / alt property names + asset-value test, used by the alt-text fixer.
 const A11Y_IMG = ['filereference', 'fileref', 'image', 'cardimage', 'ogimage', 'backgroundimage', 'mobileimage', 'desktopimage', 'imagereference'];
 const A11Y_ALT = ['alt', 'alttext', 'imagealttext', 'ctaalttext', 'alt-text'];
 const isImgAssetVal = v => /\/content\/dam\/|\/adobe\/assets\/|\.scene7\.com|\.(?:jpe?g|png|gif|webp|svg|avif|tiff?|bmp)(?:$|[?#"])/i.test(v || '');
@@ -3244,73 +3311,6 @@ function imageAltProps(attrs, raw) {
 const isCustomImageNode = attrs => attrs['auecomponentid'] === 'custom-image' || attrs['model'] === 'custom-image';
 // Franklin boolean/typed values render as e.g. "{Boolean}true".
 const isDecorativeImage = attrs => /^(?:\{Boolean\})?true$/i.test(attrs.imageisdecorative || '') || /^(presentation|none)$/i.test(attrs.role || '') || attrs.decorative === 'true';
-
-// Static accessibility scan of a Franklin block region: flags authored a11y gaps —
-// missing/empty image alt (component nodes + rich-text <img>), controls with no
-// accessible name, and vague link text. Heuristic + component-property-name based.
-function qaAccessibility(xml) {
-  const findings = [];
-  const TEXT = ['text', 'ctatext', 'title', 'linktext', 'label', 'buttontext', 'linklabel'];
-  const ARIA = ['arialabel', 'aria-label'];
-  const ICON = ['icon', 'ctaicon', 'iconname'];
-  const LINK = ['href', 'link', 'ctalink', 'url', 'linkurl', 'link-url'];
-  const VAGUE = new Set(['click here', 'read more', 'learn more', 'more', 'here', 'link', 'read', 'click', 'this link', 'details', 'view', 'see more', 'find out more', 'continue']);
-  const fileOf = v => { try { return decodeURIComponent((v || '').split(/[?#]/)[0].split('/').filter(Boolean).pop() || ''); } catch { return (v || '').split('/').pop(); } };
-
-  const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)\s*\/?>/g;
-  let m;
-  while ((m = elRe.exec(xml))) {
-    const node = m[1];
-    const attrs = {}, raw = {};
-    let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
-    while ((a = aRe.exec(m[2]))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
-    const nonEmpty = list => list.find(k => (attrs[k] || '').trim());
-    const decorative = /^(presentation|none)$/i.test(attrs.role || '') || attrs.decorative === 'true';
-
-    const imgItems = imageAltProps(attrs, raw);
-    if (imgItems.length) {
-      const genericAlt = (attrs.alt || '').trim();     // some blocks may still use a plain `alt`
-      for (const it of imgItems) {
-        if (decorative) continue;
-        if ((it.altValue || '').trim() || genericAlt) continue;      // already labelled (via <prop>Alt or plain alt)
-        const altDefined = it.altValue !== undefined;
-        findings.push({ node, issue: altDefined ? 'empty alt text' : 'missing alt text', asset: fileOf(it.value), prop: it.prop, value: it.value });
-      }
-      // Custom-image blocks require a caption — flag missing/empty ones (custom-image only).
-      if (isCustomImageNode(attrs) && !isDecorativeImage(attrs) && !(attrs.caption || '').trim())
-        findings.push({ node, issue: 'missing caption', asset: fileOf(imgItems[0].value), prop: 'caption', value: imgItems[0].value });
-    }
-
-    const hasLink = LINK.find(k => attrs[k] && /^(?:\/|https?:|#)/.test(attrs[k]));
-    const hasIcon = nonEmpty(ICON);
-    const interactive = /button|cta|link/i.test(node) || /button|cta/i.test(attrs['sling:resourcetype'] || '') || hasLink || hasIcon;
-    if (interactive) {
-      const labelKey = nonEmpty(TEXT);
-      const target = hasLink ? attrs[hasLink] : '';
-      if ((hasIcon || hasLink) && !labelKey && !nonEmpty(ARIA))
-        findings.push({ node, issue: 'control has no accessible label', asset: '', prop: hasIcon ? (raw[nonEmpty(ICON)] || 'icon') : (raw[hasLink] || 'href'), value: hasIcon ? `icon "${attrs[nonEmpty(ICON)]}" — no visible text or aria-label` : `${target} — no link text or aria-label` });
-      if (labelKey && VAGUE.has((attrs[labelKey] || '').trim().toLowerCase()))
-        findings.push({ node, issue: 'vague link text', asset: '', prop: raw[labelKey] || labelKey, value: `"${attrs[labelKey]}"${target ? ` → ${target}` : ''}` });
-    }
-  }
-
-  // Rich-text passes (entity-encoded HTML inside RTE values).
-  const decoded = xml.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-  for (const im of decoded.matchAll(/<img\b[^>]*>/gi)) {
-    const alt = im[0].match(/\balt\s*=\s*"([^"]*)"/i);
-    const src = im[0].match(/\bsrc\s*=\s*"([^"]*)"/i)?.[1] || '';
-    if (!alt || !alt[1].trim())
-      findings.push({ node: 'img (rich text)', issue: alt ? 'empty alt text' : 'missing alt text', asset: fileOf(src), prop: 'src', value: src });
-  }
-  // Rich-text <figure> with no <figcaption> → uncaptioned figure.
-  for (const fig of decoded.matchAll(/<figure\b[^>]*>[\s\S]*?<\/figure>/gi)) {
-    if (!/<figcaption\b/i.test(fig[0])) {
-      const src = fig[0].match(/<img\b[^>]*\bsrc\s*=\s*"([^"]*)"/i)?.[1] || '';
-      findings.push({ node: 'figure (rich text)', issue: 'missing caption', asset: fileOf(src), prop: 'figure', value: src || '(figure with no figcaption)' });
-    }
-  }
-  return findings;
-}
 
 // ── Alt-text auto-fix (from DAM metadata dc:title) ─────────────────────────────
 // Resolve an image value (DM Open API URL or /content/dam path) to its /content/dam
@@ -3727,7 +3727,7 @@ app.post('/api/link-checker/report', express.json({ limit: '1mb' }), async (req,
     const zip   = inner ? new AdmZip(inner.getData()) : outer;
 
     const agg = new Map();
-    const summary = { fix: 0, ok: 0, warn: 0, cant: 0, skip: 0, a11y: 0 };
+    const summary = { fix: 0, ok: 0, warn: 0, cant: 0, skip: 0 };
     let pagesScanned = 0;
     for (const entry of zip.getEntries()) {
       if (entry.isDirectory || !entry.entryName.endsWith('.xml')) continue;
@@ -3745,16 +3745,9 @@ app.post('/api/link-checker/report', express.json({ limit: '1mb' }), async (req,
         if (!agg.has(key)) agg.set(key, { check: r.check, current: url, newUrl: r.newUrl, verdict: r.verdict, cls: r.cls, count: 0, pages: new Set() });
         const a = agg.get(key); a.count++; a.pages.add(file);
       }
-      for (const f of qaAccessibility(region)) {
-        summary.a11y++;
-        const detail = f.prop ? `${f.prop}="${f.value}"` : f.value;
-        const key = 'accessibility|' + f.issue + '|' + f.node + '|' + f.value;
-        if (!agg.has(key)) agg.set(key, { check: 'accessibility', current: `${f.node} — ${detail}`, newUrl: '', verdict: f.issue, cls: 'a11y', count: 0, pages: new Set() });
-        const a = agg.get(key); a.count++; a.pages.add(file);
-      }
     }
 
-    const order = { cant: 0, a11y: 1, warn: 2, fix: 3, skip: 4, ok: 5 };
+    const order = { cant: 0, warn: 1, fix: 2, skip: 3, ok: 4 };
     const rows = [...agg.values()]
       .map(a => ({ check: a.check, current: a.current, newUrl: a.newUrl, verdict: a.verdict, cls: a.cls, count: a.count, files: a.pages.size, sample: [...a.pages].slice(0, 3), headStatus: '' }))
       .sort((x, y) => (order[x.cls] - order[y.cls]) || (y.count - x.count));

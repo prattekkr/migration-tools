@@ -1411,7 +1411,6 @@ function lcRenderReport(data) {
   } else dc.style.display = 'none';
 
   lcResetBroken();
-  lcRenderAccessibility(data);
   lcRenderStyles(data);
   lcRenderRobots(data);
   lcRenderCrossLocale();
@@ -1546,10 +1545,89 @@ function lcRenderStyles(data) {
         ${conflict.selected.map(value => `<option value="${escHtml(value)}">${escHtml(value)}</option>`).join('')}
       </select>
     </div>`).join('');
-  const examples = lcExamples((s.examples || []).filter(example => example.issue !== 'single-select-conflict'));
+  const grouped = (s.groups || []).filter(g => g.issue !== 'single-select-conflict');
+  lcStyleView = { groups: grouped, categories: s.categories || {}, issue: 'all', text: '', conflicts: s.singleSelectConflicts || 0 };
+  const flat = grouped.length ? '' : lcExamples((s.examples || []).filter(example => example.issue !== 'single-select-conflict'));
   document.getElementById('lcStylesBody').innerHTML = review +
     (choices ? `<div style="max-height:400px;overflow:auto">${choices}</div>` : '') +
-    (examples || (choices ? '' : '<div class="text-muted small">—</div>'));
+    (grouped.length ? `<div id="lcStyleSummary" class="mb-2"></div>
+      <input type="search" class="form-control form-control-sm mb-2" id="lcStyleFilter" placeholder="Filter by block, property, class or page…" oninput="lcSetStyleText(this.value)" />
+      <div id="lcStyleGroups"></div>` : flat || (choices ? '' : '<div class="text-muted small">—</div>'));
+  if (grouped.length) lcRenderStyleGroups();
+}
+
+const LC_STYLE_ISSUES = {
+  'move-target-undeclared': { label: 'Class can\'t be moved (target not in modelFields)', cls: 'bg-warning text-dark', hint: 'The target *_commonCustomClass is not declared in modelFields, so Fix leaves the class untouched. Move it manually.' },
+  'cta-default-redundant': { label: 'CTA: default-cta removed', cls: 'bg-info', hint: 'back-cta is present, so Fix removes default-cta automatically.' },
+  'class-move': { label: 'Class moved to common field', cls: 'bg-primary', hint: 'Fix moves these body-unica-* classes into the free-form *_commonCustomClass (appended comma-separated after existing values). Any other non-picklist class in the same property is dropped.' },
+  'unsupported-class': { label: 'Class not in picklist', cls: 'bg-danger', hint: 'Fix drops these classes from the dynamic-picklist property.' },
+  'undeclared-field': { label: 'Property not in modelFields', cls: 'bg-warning text-dark', hint: 'Fix removes the whole property from the node.' },
+};
+let lcStyleView = { groups: [], categories: {}, issue: 'all', text: '', conflicts: 0 };
+
+function lcSetStyleIssue(issue) { lcStyleView.issue = issue; lcRenderStyleGroups(); }
+function lcSetStyleText(text) { lcStyleView.text = String(text || '').trim().toLowerCase(); lcRenderStyleGroups(); }
+
+function lcStyleGroupVisible(group) {
+  const view = lcStyleView;
+  if (view.issue !== 'all' && group.issue !== view.issue) return false;
+  if (!view.text) return true;
+  return [group.block, group.prop, group.label].some(v => String(v || '').toLowerCase().includes(view.text))
+    || group.items.some(item => item.file.toLowerCase().includes(view.text) || item.node.toLowerCase().includes(view.text));
+}
+
+function lcRenderStyleGroups() {
+  const view = lcStyleView;
+  const chip = (issue, label, count) =>
+    `<button type="button" class="btn btn-sm ${view.issue === issue ? 'btn-dark' : 'btn-outline-secondary'} me-1 mb-1" onclick="lcSetStyleIssue('${issue}')">${escHtml(label)} <span class="badge bg-secondary ms-1">${count}</span></button>`;
+  const total = view.groups.reduce((sum, g) => sum + g.count, 0);
+  const summary = document.getElementById('lcStyleSummary');
+  if (summary) summary.innerHTML = chip('all', 'All', total) +
+    Object.keys(LC_STYLE_ISSUES).filter(issue => view.categories[issue]).map(issue => chip(issue, LC_STYLE_ISSUES[issue].label, view.categories[issue])).join('') +
+    (view.conflicts ? '<span class="small text-muted ms-1">Single-select conflicts are resolved with the dropdowns above.</span>' : '');
+
+  const rows = view.groups.map((group, index) => ({ group, index })).filter(({ group }) => lcStyleGroupVisible(group));
+  const html = rows.map(({ group, index }) => {
+    const meta = LC_STYLE_ISSUES[group.issue] || { label: group.issue, cls: 'bg-secondary', hint: '' };
+    const detail = ['unsupported-class', 'class-move', 'move-target-undeclared'].includes(group.issue) ? `<code class="${group.issue === 'unsupported-class' ? 'text-danger' : 'text-primary'}">${escHtml(group.label)}</code>` : '';
+    return `
+    <details class="border rounded mb-2" ontoggle="if(this.open)lcStyleOpen(${index})">
+      <summary class="p-2 d-flex align-items-center gap-2 flex-wrap" style="cursor:pointer">
+        <span class="badge ${meta.cls}">${escHtml(meta.label)}</span>
+        <code class="small">${escHtml(group.block)}</code>
+        <code class="small text-muted">${escHtml(group.prop)}</code>
+        ${detail}
+        <span class="text-muted small ms-auto">${group.count} occurrence(s) · ${group.files} page(s)</span>
+      </summary>
+      <div class="px-3 pb-2">
+        <div class="small text-muted mb-1">${escHtml(meta.hint)}</div>
+        <div id="lcStyleItems${index}"></div>
+      </div>
+    </details>`;
+  }).join('');
+  const groups = document.getElementById('lcStyleGroups');
+  if (groups) groups.innerHTML = html || '<div class="text-muted small">No findings match the current filter.</div>';
+}
+
+// Page → nodes list for one group, rendered on demand and in pages to keep 1000s of findings responsive.
+function lcStyleOpen(index, limit = 50) {
+  const group = lcStyleView.groups[index];
+  const target = document.getElementById(`lcStyleItems${index}`);
+  if (!group || !target) return;
+  const byFile = new Map();
+  for (const item of group.items) {
+    if (!byFile.has(item.file)) byFile.set(item.file, []);
+    byFile.get(item.file).push(item);
+  }
+  const files = [...byFile.entries()];
+  const shown = files.slice(0, limit);
+  target.innerHTML = shown.map(([file, items]) => `
+    <div class="mb-2">
+      <code class="small text-secondary" style="word-break:break-all">${escHtml(file)}</code>
+      <ul class="small mb-0">${items.map(item =>
+        `<li><code>${escHtml(item.node)} #${item.nodeIndex}</code>${group.issue === 'undeclared-field' ? ` = <code class="text-muted">"${escHtml(item.value)}"</code>` : ` <code class="text-muted">${escHtml(group.prop)}="${escHtml(item.value)}"</code>`}</li>`).join('')}</ul>
+    </div>`).join('') +
+    (files.length > limit ? `<button type="button" class="btn btn-sm btn-link p-0" onclick="lcStyleOpen(${index}, ${limit + 50})">Show more (${files.length - limit} more page(s))</button>` : '');
 }
 
 function lcStyleSelections() {
@@ -1568,49 +1646,6 @@ function lcRenderRobots(data) {
   document.getElementById('lcRobotsCount').textContent = s.count;
   document.getElementById('lcRobotsBody').innerHTML = lcExamples(s.examples) ||
     '<div class="text-muted small">—</div>';
-}
-
-// Static accessibility findings (advisory — not auto-fixed).
-const LC_A11Y_HINT = {
-  'missing alt text': 'No <code>alt</code> — screen readers announce nothing. Add descriptive alt text.',
-  'empty alt text': 'Empty <code>alt</code> — fine only for purely decorative images; otherwise describe it.',
-  'control has no accessible label': 'Icon/link with no visible text or <code>aria-label</code> — add a label.',
-  'missing caption': 'Figure has no <code>&lt;figcaption&gt;</code>.',
-  'empty caption': 'Caption field is blank — a caption may have been lost in migration.',
-  'vague link text': 'Link text like "read more" is meaningless out of context — make it descriptive.',
-};
-function lcRenderAccessibility(data) {
-  const card = document.getElementById('lcA11yCard');
-  const list = data.accessibility || [];
-  card.style.display = '';
-  const total = list.reduce((s, a) => s + a.count, 0);
-  document.getElementById('lcA11yCount').textContent = total;
-  if (!list.length) {
-    document.getElementById('lcA11yBody').innerHTML =
-      '<div class="text-muted small">No accessibility findings. You can still refresh existing image alt text from DAM metadata.</div>';
-    return;
-  }
-  document.getElementById('lcA11yBody').innerHTML = list.map((a, i) => {
-    const pageOf = p => p.replace(/\/(?:_?jcr_content|\.content\.xml).*$/i, '').replace(/\.content\.xml$/i, '');
-    const samples = (a.samples || []).map(s => `
-      <li class="mb-1">
-        ${s.asset ? `<span class="fw-semibold">${escHtml(s.asset)}</span> — ` : ''}<code style="word-break:break-all">${escHtml(s.value || '(no value)')}</code>
-        <div class="text-secondary" style="font-size:.75rem">${escHtml(pageOf(s.page))}</div>
-      </li>`).join('');
-    const more = a.count > (a.samples || []).length ? `<div class="form-text mb-0">…and ${a.count - a.samples.length} more occurrence(s).</div>` : '';
-    return `
-    <div class="mb-2 pb-2 border-bottom">
-      <div class="d-flex align-items-center gap-2 flex-wrap">
-        <span class="badge bg-info">${escHtml(a.issue)}</span>
-        <code class="small">${escHtml(a.node)}</code>
-        ${a.prop ? `<span class="text-muted small">· <code>${escHtml(a.prop)}</code></span>` : ''}
-        <span class="text-muted small ms-auto">${a.count} occurrence(s) · ${a.files} page(s)</span>
-      </div>
-      ${LC_A11Y_HINT[a.issue] ? `<div class="small text-muted mt-1">${LC_A11Y_HINT[a.issue]}</div>` : ''}
-      <ul class="small mt-2 mb-0" style="max-height:220px;overflow:auto">${samples}</ul>
-      ${more}
-    </div>`;
-  }).join('');
 }
 
 // Assets the asset-map can't resolve — author pastes a DM URL for each; Fix all applies them.
@@ -1783,6 +1818,8 @@ async function lcFix(checks) {
     const altSkipped = parseInt(res.headers.get('X-Alt-Skipped') || '0', 10);
     const styleConflicts = parseInt(res.headers.get('X-Style-Conflicts') || '0', 10);
     const styleResolved = parseInt(res.headers.get('X-Style-Resolved') || '0', 10);
+    const styleMoved = parseInt(res.headers.get('X-Style-Moved') || '0', 10);
+    const styleManual = parseInt(res.headers.get('X-Style-Manual') || '0', 10);
     const reportId = res.headers.get('X-Report-Id');
     const persisted = parseInt(res.headers.get('X-Custom-Persisted') || '0', 10);
     const persistEnvs = res.headers.get('X-Persist-Envs') || '';
@@ -1791,10 +1828,12 @@ async function lcFix(checks) {
     const url  = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'qa-fixed-package.zip'; a.click();
     URL.revokeObjectURL(url);
-    status.className = `small mt-2 ${styleConflicts > 0 ? 'text-warning' : 'text-success'}`;
+    status.className = `small mt-2 ${styleConflicts > 0 || styleManual > 0 ? 'text-warning' : 'text-success'}`;
     status.textContent = `✓ Fixed ${changes} reference(s) across ${pages} page(s)${unmatched > 0 ? `, ${unmatched} unmatched (no CSV entry)` : ''}. ZIP downloaded.`
       + (altSkipped > 0 ? ` Skipped alt refresh for ${altSkipped} asset(s); existing text retained (see report).` : '')
       + (styleResolved > 0 ? ` Applied ${styleResolved} single-select style choice(s).` : '')
+      + (styleMoved > 0 ? ` Moved body-unica-* classes to the common class field on ${styleMoved} property(ies).` : '')
+      + (styleManual > 0 ? ` ${styleManual} class(es) could not be moved because the common class field is not in modelFields; retained for manual review (see report).` : '')
       + (styleConflicts > 0 ? ` ${styleConflicts} single-select style conflict(s) require manual review; selections retained (see report).` : '')
       + (recovered > 0 ? ` Recovered ${recovered} asset(s) from AEM author — synced to all env asset-maps.` : '')
       + (persisted > 0 ? ` Saved ${persisted} manual mapping(s) to the asset-map for: ${persistEnvs.replace(/,/g, ', ')} (per-env host).` : '');
@@ -1851,7 +1890,6 @@ const LC_VERDICT = {
   warn: { label: 'Needs attention', badge: 'bg-warning'   },
   cant: { label: "Can't fix",       badge: 'bg-danger'    },
   skip: { label: 'Skipped',         badge: 'bg-secondary' },
-  a11y: { label: 'Accessibility',   badge: 'bg-info'      },
 };
 
 async function lcReport() {
@@ -1887,8 +1925,8 @@ function lcRenderReportPanel() {
 
   const chip = (cls, label, n) =>
     `<button class="btn btn-sm ${lcReportFilterCls === cls ? 'btn-dark' : 'btn-outline-secondary'}" onclick="lcSetReportFilter('${cls}')">${label} <span class="badge ${cls === 'all' ? 'bg-secondary' : LC_VERDICT[cls].badge} ms-1">${n}</span></button>`;
-  let chips = chip('all', 'All', (s.fix || 0) + (s.ok || 0) + (s.warn || 0) + (s.cant || 0) + (s.skip || 0) + (s.a11y || 0)) +
-    ['fix', 'ok', 'warn', 'cant', 'skip', 'a11y'].map(c => chip(c, LC_VERDICT[c].label, s[c] || 0)).join('');
+  let chips = chip('all', 'All', (s.fix || 0) + (s.ok || 0) + (s.warn || 0) + (s.cant || 0) + (s.skip || 0)) +
+    ['fix', 'ok', 'warn', 'cant', 'skip'].map(c => chip(c, LC_VERDICT[c].label, s[c] || 0)).join('');
   if (d.validated) chips += chip('broken', 'Broken (404)', d.validatedCounts.broken + d.validatedCounts.errors);
 
   const isBroken = r => /^40[34]$/.test(r.headStatus) || (r.headStatus || '').startsWith('ERR');
@@ -1905,10 +1943,9 @@ function lcRenderReportPanel() {
   };
 
   const rowHtml = rows.map(r => {
-    const newLine = r.cls === 'a11y' ? ''
-      : r.newUrl
-        ? `<div class="small"><i class="bi bi-arrow-return-right text-muted me-1"></i><code class="text-success" style="word-break:break-all">${escHtml(r.newUrl)}</code></div>`
-        : `<div class="small text-muted"><i class="bi bi-arrow-return-right me-1"></i>${r.cls === 'cant' ? "— can't fix —" : (r.cls === 'skip' ? 'unchanged' : '— review —')}</div>`;
+    const newLine = r.newUrl
+      ? `<div class="small"><i class="bi bi-arrow-return-right text-muted me-1"></i><code class="text-success" style="word-break:break-all">${escHtml(r.newUrl)}</code></div>`
+      : `<div class="small text-muted"><i class="bi bi-arrow-return-right me-1"></i>${r.cls === 'cant' ? "— can't fix —" : (r.cls === 'skip' ? 'unchanged' : '— review —')}</div>`;
     return `<div class="py-2 border-top">
       <div class="d-flex align-items-center gap-2 flex-wrap">
         <span class="badge bg-light text-dark border">${escHtml(r.check)}</span>
