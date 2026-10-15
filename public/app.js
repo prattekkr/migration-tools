@@ -1552,6 +1552,7 @@ function lcRenderStyles(data) {
       </select>
     </div>`).join('');
   const grouped = (s.groups || []).filter(g => g.issue !== 'single-select-conflict');
+  lcClassActions = new Map();   // decisions belong to one scan; a re-scan starts from the defaults
   lcStyleView = { groups: grouped, categories: s.categories || {}, issue: 'all', text: '', conflicts: s.singleSelectConflicts || 0 };
   const flat = grouped.length ? '' : lcExamples((s.examples || []).filter(example => example.issue !== 'single-select-conflict'));
   document.getElementById('lcStylesBody').innerHTML = review +
@@ -1567,8 +1568,8 @@ const LC_STYLE_ISSUES = {
   'move-target-undeclared': { label: 'Class can\'t be moved (target not in modelFields)', cls: 'bg-warning text-dark', hint: 'The target *_commonCustomClass is not declared in modelFields, so Fix leaves the class untouched. Move it manually.' },
   'cta-default-redundant': { label: 'CTA: default-cta removed', cls: 'bg-info', hint: 'back-cta is present, so Fix removes default-cta automatically.' },
   'hero-height-move': { label: 'Hero height moved to parent', cls: 'bg-primary', hint: 'Fix moves the hero-container-item\'s height-* class to its parent hero-container, replacing any height the parent already has. Other non-picklist classes on the item are dropped.' },
-  'class-move': { label: 'Class moved to common field', cls: 'bg-primary', hint: 'Fix moves these body-unica-* classes into the free-form *_commonCustomClass (appended comma-separated after existing values). Any other non-picklist class in the same property is dropped.' },
-  'unsupported-class': { label: 'Class not in picklist', cls: 'bg-danger', hint: 'Fix drops these classes from the dynamic-picklist property.' },
+  'class-move': { label: 'Class moved to common field', cls: 'bg-primary', hint: 'By default Fix moves body-unica-* classes into the free-form *_commonCustomClass (appended comma-separated after existing values) and drops any other non-picklist class in the property. Use the dropdown on a class to remove it, move it or leave it.' },
+  'unsupported-class': { label: 'Class not in picklist', cls: 'bg-danger', hint: 'By default Fix drops these classes. Use the dropdown on a class to remove it, move it to the common class field (*_commonCustomClass, appended with a comma) or leave it as is. The choice applies to that class in this block and property on every page.' },
   'undeclared-field': { label: 'Property not in modelFields', cls: 'bg-warning text-dark', hint: 'Fix removes the whole property from the node.' },
 };
 let lcStyleView = { groups: [], categories: {}, issue: 'all', text: '', conflicts: 0 };
@@ -1597,7 +1598,17 @@ function lcRenderStyleGroups() {
   const rows = view.groups.map((group, index) => ({ group, index })).filter(({ group }) => lcStyleGroupVisible(group));
   const html = rows.map(({ group, index }) => {
     const meta = LC_STYLE_ISSUES[group.issue] || { label: group.issue, cls: 'bg-secondary', hint: '' };
-    const detail = ['unsupported-class', 'class-move', 'move-target-undeclared', 'hero-height-move', 'hero-height-manual'].includes(group.issue) ? `<code class="${group.issue === 'unsupported-class' ? 'text-danger' : 'text-primary'}">${escHtml(group.label)}</code>` : '';
+    const classNames = ['unsupported-class', 'class-move', 'move-target-undeclared', 'hero-height-move', 'hero-height-manual'].includes(group.issue);
+    const detail = !classNames ? ''
+      : (group.classes && group.classes.length) ? group.classes.map((cls, ci) => cls.defaultAction
+        ? `<span class="d-inline-flex align-items-center gap-1">
+            <code class="${group.issue === 'unsupported-class' ? 'text-danger' : 'text-primary'}">${escHtml(cls.name)}</code>
+            <select class="form-select form-select-sm w-auto py-0" id="lcCA${index}_${ci}" title="What Fix does with this class on every page" onclick="event.stopPropagation()" onchange="lcSetClassAction(${index}, ${ci}, this.value)">
+              ${Object.keys(LC_CLASS_ACTIONS).map(action => `<option value="${action}"${lcClassActionOf(group, cls) === action ? ' selected' : ''}>${escHtml(LC_CLASS_ACTIONS[action])}</option>`).join('')}
+            </select>
+          </span>`
+        : `<span class="d-inline-flex align-items-center gap-1"><code class="text-primary">${escHtml(cls.name)}</code><span class="small text-muted">(hero height rule)</span></span>`).join('')
+      : `<code class="${group.issue === 'unsupported-class' ? 'text-danger' : 'text-primary'}">${escHtml(group.label)}</code>`;
     return `
     <details class="border rounded mb-2" ontoggle="if(this.open)lcStyleOpen(${index})">
       <summary class="p-2 d-flex align-items-center gap-2 flex-wrap" style="cursor:pointer">
@@ -1605,6 +1616,7 @@ function lcRenderStyleGroups() {
         <code class="small">${escHtml(group.block)}</code>
         <code class="small text-muted">${escHtml(group.prop)}</code>
         ${detail}
+        <span id="lcCAflag${index}">${lcClassActionFlag(group)}</span>
         <span class="text-muted small ms-auto">${group.count} occurrence(s) · ${group.files} page(s)</span>
       </summary>
       <div class="px-3 pb-2">
@@ -1615,6 +1627,42 @@ function lcRenderStyleGroups() {
   }).join('');
   const groups = document.getElementById('lcStyleGroups');
   if (groups) groups.innerHTML = html || '<div class="text-muted small">No findings match the current filter.</div>';
+}
+
+// Per-class decisions for classes not in the picklist: remove, move to *_commonCustomClass, or leave.
+// One decision covers that class in that block and property on every page.
+const LC_CLASS_ACTIONS = { remove: 'Remove', move: 'Move to common field', keep: 'Leave as is' };
+let lcClassActions = new Map();
+const lcClassActionKey = (group, cls) => JSON.stringify([group.block, group.prop, cls.name]);
+const lcClassActionOf = (group, cls) => lcClassActions.get(lcClassActionKey(group, cls)) || cls.defaultAction;
+
+function lcClassActionFlag(group) {
+  const changed = (group.classes || []).some(cls => cls.defaultAction && lcClassActionOf(group, cls) !== cls.defaultAction);
+  return changed ? '<span class="badge bg-warning text-dark" title="You changed what Fix does with a class in this group">customized</span>' : '';
+}
+
+function lcSetClassAction(index, ci, value) {
+  const group = lcStyleView.groups[index];
+  const cls = group && group.classes && group.classes[ci];
+  if (!cls || !cls.defaultAction || !LC_CLASS_ACTIONS[value]) return;   // hero height classes follow their own rule
+  const key = lcClassActionKey(group, cls);
+  if (value === cls.defaultAction) lcClassActions.delete(key); else lcClassActions.set(key, value);
+  lcStyleView.groups.forEach((other, gi) => {
+    (other.classes || []).forEach((otherCls, oi) => {
+      if (lcClassActionKey(other, otherCls) !== key) return;
+      const select = document.getElementById(`lcCA${gi}_${oi}`);
+      if (select) select.value = value;
+    });
+    const flag = document.getElementById(`lcCAflag${gi}`);
+    if (flag) flag.innerHTML = lcClassActionFlag(other);
+  });
+}
+
+function lcStyleClassActions() {
+  return [...lcClassActions].map(([key, action]) => {
+    const [block, prop, cls] = JSON.parse(key);
+    return { block, prop, cls, action };
+  });
 }
 
 // Page → nodes list for one group, rendered on demand and in pages to keep 1000s of findings responsive.
@@ -1809,7 +1857,11 @@ function lcFixRequest(checks) {
   if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'styles', 'robots', 'crossLocale']
                                   : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'styles', 'robots'];
   const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel };
-  if (sel.includes('styles')) body.styleSelections = lcStyleSelections();
+  if (sel.includes('styles')) {
+    body.styleSelections = lcStyleSelections();
+    const classActions = lcStyleClassActions();
+    if (classActions.length) body.styleClassActions = classActions;
+  }
   if (sel.includes('crossLocale')) body.crossLocaleMappings = mappings;
   if (sel.some(c => c === 'pdf' || c === 'dam' || c === 'scene7')) body.customAssetMappings = lcCustomAssetMappings();
   return body;
@@ -1835,6 +1887,7 @@ async function lcFix(checks) {
     const styleMoved = parseInt(res.headers.get('X-Style-Moved') || '0', 10);
     const heroMoved = parseInt(res.headers.get('X-Hero-Height-Moved') || '0', 10);
     const styleManual = parseInt(res.headers.get('X-Style-Manual') || '0', 10);
+    const styleKept = parseInt(res.headers.get('X-Style-Kept') || '0', 10);
     const reportId = res.headers.get('X-Report-Id');
     const persisted = parseInt(res.headers.get('X-Custom-Persisted') || '0', 10);
     const persistEnvs = res.headers.get('X-Persist-Envs') || '';
@@ -1849,6 +1902,7 @@ async function lcFix(checks) {
       + (styleResolved > 0 ? ` Applied ${styleResolved} single-select style choice(s).` : '')
       + (styleMoved > 0 ? ` Moved body-unica-* classes to the common class field on ${styleMoved} property(ies).` : '')
       + (heroMoved > 0 ? ` Moved the height class of ${heroMoved} hero-container-item(s) to the parent hero-container.` : '')
+      + (styleKept > 0 ? ` ${styleKept} class(es) left as is by your choice; they will be flagged again on the next scan.` : '')
       + (styleManual > 0 ? ` ${styleManual} class(es) could not be moved automatically; retained for manual review (see report).` : '')
       + (styleConflicts > 0 ? ` ${styleConflicts} single-select style conflict(s) require manual review; selections retained (see report).` : '')
       + (recovered > 0 ? ` Recovered ${recovered} asset(s) from AEM author — synced to all env asset-maps.` : '')
@@ -1878,6 +1932,7 @@ const LC_PREVIEW_TYPES = {
   'single-select-style-conflict': { label: 'Styles: single-select conflict', cls: 'bg-warning text-dark' },
   'style-class-move-blocked': { label: 'Styles: class could not be moved', cls: 'bg-warning text-dark' },
   'hero-height-blocked': { label: 'Hero: height needs manual move', cls: 'bg-warning text-dark' },
+  'style-class-kept': { label: 'Styles: class left as is', cls: 'bg-secondary' },
   'robots-tags': { label: 'Robots tags added', cls: 'bg-secondary' },
 };
 let lcPreview = { data: null, groups: [], text: '' };

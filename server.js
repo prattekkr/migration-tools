@@ -2283,7 +2283,7 @@ app.post('/api/link-checker/analyze', express.json({ limit: '1mb' }), (req, res)
       for (const s of scanUnsupportedStyles(region, styleVocab)) {
         const groupKey = styleGroupLabel(s);
         const gk = [s.issue, s.block, s.prop, groupKey].join('|');
-        if (!styleGroups.has(gk)) styleGroups.set(gk, { issue: s.issue, block: s.block, prop: s.prop, label: groupKey, count: 0, files: new Set(), items: [] });
+        if (!styleGroups.has(gk)) styleGroups.set(gk, { issue: s.issue, block: s.block, prop: s.prop, label: groupKey, classes: styleChoiceClasses(s), count: 0, files: new Set(), items: [] });
         const sg = styleGroups.get(gk);
         sg.count++; sg.files.add(file);
         sg.items.push({ file, node: s.node, nodeIndex: s.nodeIndex, value: s.value });
@@ -2588,6 +2588,40 @@ function styleConfigKey(attrs, vocab) {
 // Non-picklist classes matching these patterns are moved to *_commonCustomClass, not dropped.
 const STYLE_MOVE_PATTERNS = [/^body-unica-/];
 const isMovableStyleClass = token => STYLE_MOVE_PATTERNS.some(pattern => pattern.test(token));
+const STYLE_CLASS_ACTIONS = new Set(['remove', 'move', 'keep']);
+const styleClassActionKey = (block, prop, cls) => JSON.stringify([block, prop, cls]);
+
+// Classes of a finding the author can decide on, with the action Fix takes by default.
+// Hero height classes are governed by their own rule, so they have no choice (defaultAction null).
+function styleChoiceClasses(finding) {
+  const rule = name => ({ name, defaultAction: null });
+  const withDefault = action => name => ({ name, defaultAction: action });
+  switch (finding.issue) {
+    case 'hero-height-move': return [...finding.heightMoved.map(rule), ...finding.moved.map(withDefault('move')), ...finding.dropped.map(withDefault('remove'))];
+    case 'class-move': return [...finding.moved.map(withDefault('move')), ...finding.dropped.map(withDefault('remove'))];
+    case 'unsupported-class': return finding.dropped.map(withDefault('remove'));
+    case 'move-target-undeclared': return finding.unsupported.map(withDefault('move'));
+    case 'hero-height-manual': return finding.unsupported.map(rule);
+    default: return [];
+  }
+}
+
+// Every block/property/class that can carry a decision in this package (used to reject stale choices).
+function collectStyleChoiceKeys(buffer, vocab) {
+  const outer = new AdmZip(buffer);
+  const inner = outer.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
+  const zip = inner ? new AdmZip(inner.getData()) : outer;
+  const keys = new Set();
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory || !entry.entryName.endsWith('.xml') || lcIsSkipped(entry.entryName)) continue;
+    const xml = entry.getData().toString('utf8');
+    if (!isFranklinPage(xml)) continue;
+    for (const finding of scanUnsupportedStyles(franklinBlockRegion(xml).region, vocab))
+      for (const cls of styleChoiceClasses(finding))
+        if (cls.defaultAction) keys.add(styleClassActionKey(finding.block, finding.prop, cls.name));
+  }
+  return keys;
+}
 
 // hero-container-item: any height-* class belongs to the parent hero-container and always
 // replaces that parent's height (a single-select group). Plans are keyed by tag offset.
@@ -2671,21 +2705,25 @@ function styleFieldFindings(attrs, raw, vocab, ctx = {}) {
       const heightMoved = ctx.heroItem && ctx.heroItem.move ? unsupported.filter(t => ctx.heroItem.move.includes(t)) : [];
       const heightKept = ctx.heroItem && ctx.heroItem.keep ? unsupported.filter(t => ctx.heroItem.keep.includes(t)) : [];
       const rest = unsupported.filter(t => !heightMoved.includes(t) && !heightKept.includes(t));
-      const movable = rest.filter(isMovableStyleClass);
+      // Per-class decision (remove / move / keep); without one, body-unica-* moves and the rest are dropped.
+      const actionOf = t => (ctx.classActions && ctx.classActions.get(styleClassActionKey(block, raw[ln], t))) || (isMovableStyleClass(t) ? 'move' : 'remove');
+      const movable = rest.filter(t => actionOf(t) === 'move');
+      const keptByChoice = rest.filter(t => actionOf(t) === 'keep');
       const targetLn = ln.replace(/customdynamicclass$/, 'commoncustomclass');
       const target = raw[targetLn] || raw[ln].replace(/customDynamicClass$/i, 'commonCustomClass');
       const blocked = movable.length > 0 && fields !== null && !fields.has(targetLn);   // target would be removed as undeclared next scan
       const moved = blocked ? [] : movable;
-      const dropped = rest.filter(t => !movable.includes(t));
+      const dropped = rest.filter(t => actionOf(t) === 'remove');
       if (heightKept.length) findings.push({ block, prop: raw[ln], issue: 'hero-height-manual', value: attrs[ln], unsupported: heightKept, reason: ctx.heroItem.reason });
       if (blocked) findings.push({ block, prop: raw[ln], issue: 'move-target-undeclared', value: attrs[ln], unsupported: movable, target, reason: `${target} is not declared in modelFields; move the class manually` });
+      if (keptByChoice.length) findings.push({ block, prop: raw[ln], issue: 'class-kept', value: attrs[ln], unsupported: keptByChoice });
       if (heightMoved.length || moved.length || dropped.length) {
         const existing = (attrs[targetLn] || '').split(',').map(t => t.trim()).filter(Boolean);
         findings.push({
           block, prop: raw[ln], issue: heightMoved.length ? 'hero-height-move' : moved.length ? 'class-move' : 'unsupported-class', value: attrs[ln],
           unsupported: [...heightMoved, ...moved, ...dropped], heightMoved, moved, dropped, target,
           mergedValue: [...new Set([...existing, ...moved])].join(','),
-          replacementValue: tokens.filter(t => allowed.has(t) || (blocked && movable.includes(t)) || heightKept.includes(t)).join(','),
+          replacementValue: tokens.filter(t => allowed.has(t) || (blocked && movable.includes(t)) || heightKept.includes(t) || keptByChoice.includes(t)).join(','),
         });
       }
     }
@@ -2742,7 +2780,7 @@ function styleGroupsToList(groups) {
   const rank = issue => { const i = STYLE_ISSUE_ORDER.indexOf(issue); return i < 0 ? STYLE_ISSUE_ORDER.length : i; };
   return [...groups.values()]
     .sort((a, b) => rank(a.issue) - rank(b.issue) || b.count - a.count || a.block.localeCompare(b.block) || a.prop.localeCompare(b.prop) || a.label.localeCompare(b.label))
-    .map(g => ({ issue: g.issue, block: g.block, prop: g.prop, label: g.label, count: g.count, files: g.files.size, items: g.items }));
+    .map(g => ({ issue: g.issue, block: g.block, prop: g.prop, label: g.label, classes: g.classes, count: g.count, files: g.files.size, items: g.items }));
 }
 
 function styleCategorySummary(groupList) {
@@ -2773,8 +2811,8 @@ function collectStyleConflicts(buffer, vocab) {
 
 // CTA back-cta wins over default-cta; body-unica-* classes move to *_commonCustomClass;
 // other single-select conflicts need explicit choices.
-function qaFixUnsupportedStyles(xml, vocab, selections = new Map(), file = '') {
-  const changes = [], conflicts = [], manual = [];
+function qaFixUnsupportedStyles(xml, vocab, selections = new Map(), file = '', classActions = null) {
+  const changes = [], conflicts = [], manual = [], kept = [];
   const nodeCounts = new Map();
   const plan = planHeroHeights(xml, vocab);
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
@@ -2785,7 +2823,7 @@ function qaFixUnsupportedStyles(xml, vocab, selections = new Map(), file = '') {
     const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
     while ((a = aRe.exec(attrStr))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
     const heroParent = plan.parents.get(offset) || null;
-    const findings = styleFieldFindings(attrs, raw, vocab, { heroItem: plan.items.get(offset) || null, heroParent });
+    const findings = styleFieldFindings(attrs, raw, vocab, { heroItem: plan.items.get(offset) || null, heroParent, classActions });
     let out = attrStr;
     for (const finding of findings) {
       if (finding.issue === 'single-select-conflict') {
@@ -2806,6 +2844,8 @@ function qaFixUnsupportedStyles(xml, vocab, selections = new Map(), file = '') {
         changes.push({ node, block: finding.block, prop: finding.prop, removedField: true, oldValue: finding.value });
       } else if (finding.issue === 'move-target-undeclared' || finding.issue === 'hero-height-manual') {
         manual.push({ node, nodeIndex, ...finding });
+      } else if (finding.issue === 'class-kept') {
+        kept.push({ node, nodeIndex, block: finding.block, prop: finding.prop, classes: finding.unsupported });
       } else {
         const value = finding.replacementValue;
         out = out.replace(new RegExp('(\\s' + escRe(finding.prop) + '=")[^"]*(")'), (_, pre, post) => pre + xmlAttrEscape(value) + post);
@@ -2827,7 +2867,7 @@ function qaFixUnsupportedStyles(xml, vocab, selections = new Map(), file = '') {
         });
       }
     }
-    let touched = findings.length > 0;
+    let touched = findings.some(finding => finding.issue !== 'class-kept');
     if (heroParent) {
       const dynLn = 'classes_customdynamicclass';
       const existing = attrs[dynLn];
@@ -2849,7 +2889,7 @@ function qaFixUnsupportedStyles(xml, vocab, selections = new Map(), file = '') {
     }
     return touched ? `<${node}${out}${tail}>` : full;
   });
-  return { result, changes, conflicts, manual };
+  return { result, changes, conflicts, manual, kept };
 }
 
 // Report row for one applied style change.
@@ -2960,7 +3000,7 @@ async function buildQaFixedZip(buffer, opts) {
   const customMap  = new Map((opts.customAssetMappings || []).filter(m => m && m.from && m.to).map(m => [m.from, m.to]));
   const outerAdm   = new AdmZip(buffer);
   const innerEntry = outerAdm.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
-  const changes = [], unmatched = [], styleConflicts = [], styleManual = [];
+  const changes = [], unmatched = [], styleConflicts = [], styleManual = [], styleKept = [];
   let pagesFixed = 0;
 
   async function patch(adm) {
@@ -2983,7 +3023,7 @@ async function buildQaFixedZip(buffer, opts) {
           const c = qaPage && sel.has('shortPath') ? qaFixShortPaths(body, siteRoot) : { result: body, changes: [] }; body = c.result;
           const pageLocale = qaLocaleRootOf(file, siteRoot);
           const x = (qaPage && sel.has('crossLocale') && crossLocaleMappings?.length) ? qaFixCrossLocale(body, crossLocaleMappings, pageLocale) : { result: body, changes: [] }; body = x.result;
-          const st = qaPage && doStyles ? qaFixUnsupportedStyles(body, styleVocab, opts.styleSelections, file) : { result: body, changes: [], conflicts: [], manual: [] }; body = st.result;
+          const st = qaPage && doStyles ? qaFixUnsupportedStyles(body, styleVocab, opts.styleSelections, file, opts.styleClassActions) : { result: body, changes: [], conflicts: [], manual: [], kept: [] }; body = st.result;
           body = unmaskProtected(body, protectedVals);   // restore cq:template/tags/MSM refs before writing back
           const rob = qaPage && doRobots ? qaFixRobotsTags(pre + body + post, robotsPagePath(file), robotsMap) : { result: pre + body + post, changes: [] };
           const after = qaPage ? sanitizeXmlEntities(normalizeDeliveryUrls(rob.result)) : rob.result;
@@ -2993,6 +3033,7 @@ async function buildQaFixedZip(buffer, opts) {
           for (const ch of st.changes) changes.push(styleChangeRow(file, ch));
           for (const conflict of st.conflicts) styleConflicts.push({ file, ...conflict });
           for (const item of st.manual) styleManual.push({ file, ...item });
+          for (const item of st.kept) styleKept.push({ file, ...item });
           for (const ch of rob.changes) changes.push({ file, type: 'robots-tags', oldUrl: '(missing)', newUrl: `cq:robotsTags="[${ch.value}]"` });
           for (const ch of b.changes) changes.push({ file, type: 'asset-dm',     ...ch });
           for (const ch of c.changes) changes.push({ file, type: 'short-path',   ...ch });
@@ -3015,9 +3056,9 @@ async function buildQaFixedZip(buffer, opts) {
       if (e.isDirectory) continue;
       outerJsz.file(e.entryName, e.entryName === innerEntry.entryName ? patchedInner : e.getData());
     }
-    return { buf: await outerJsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), changes, unmatched, pagesFixed, styleConflicts, styleManual };
+    return { buf: await outerJsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), changes, unmatched, pagesFixed, styleConflicts, styleManual, styleKept };
   }
-  return { buf: await patch(outerAdm), changes, unmatched, pagesFixed, styleConflicts, styleManual };
+  return { buf: await patch(outerAdm), changes, unmatched, pagesFixed, styleConflicts, styleManual, styleKept };
 }
 
 // Pre-scan pass for the Fix flow: walks the Franklin pages (same inner/outer zip
@@ -3076,6 +3117,11 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
   const requestedStyleSelections = req.body.styleSelections || [];
   if (requestedStyleSelections.length && !sel.has('styles'))
     return res.status(400).json({ error: 'Include the styles check to apply style selections.' });
+  if (req.body.styleClassActions !== undefined && !Array.isArray(req.body.styleClassActions))
+    return res.status(400).json({ error: 'Class actions must be an array.' });
+  const requestedClassActions = req.body.styleClassActions || [];
+  if (requestedClassActions.length && !sel.has('styles'))
+    return res.status(400).json({ error: 'Include the styles check to apply class actions.' });
 
   // Cross-locale prefix mappings: [{from, to}] — both must be /content/ paths. Longest source first.
   const crossLocaleMappings = (Array.isArray(req.body.crossLocaleMappings) ? req.body.crossLocaleMappings : [])
@@ -3108,6 +3154,20 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
         if (!conflict.selected.includes(choice.keep))
           return res.status(400).json({ error: `Choose one of the conflicting classes for group "${conflict.group}".` });
         styleSelections.set(choice.id, choice.keep);
+      }
+    }
+    const styleClassActions = new Map();
+    if (requestedClassActions.length) {
+      const available = collectStyleChoiceKeys(buffer, loadStyleVocab());
+      for (const choice of requestedClassActions) {
+        if (!choice || typeof choice.block !== 'string' || typeof choice.prop !== 'string' || typeof choice.cls !== 'string' || !STYLE_CLASS_ACTIONS.has(choice.action))
+          return res.status(400).json({ error: 'Each class action must include a block, property, class and an action of remove, move or keep.' });
+        const key = styleClassActionKey(choice.block, choice.prop, choice.cls);
+        if (styleClassActions.has(key))
+          return res.status(400).json({ error: 'Duplicate class action for the same class.' });
+        if (!available.has(key))
+          return res.status(400).json({ error: `The class "${choice.cls}" (${choice.block}, ${choice.prop}) is no longer an unsupported class in this package. Re-scan and choose again.` });
+        styleClassActions.set(key, choice.action);
       }
     }
     let pathMap = null, scene7Map = null, damNorm = null, se = null, uuidToRow = null;
@@ -3160,7 +3220,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
       if (host && sel.has('caption')) captionByValue = (await computeCaptionFills(buffer, uuidToRow, damNorm, hostCfg, !!overwrite)).captionByValue;
     }
 
-    const { buf, changes, unmatched, pagesFixed, styleConflicts, styleManual } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue, captionByValue, overwriteCaptions: !!overwrite, styleSelections });
+    const { buf, changes, unmatched, pagesFixed, styleConflicts, styleManual, styleKept } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue, captionByValue, overwriteCaptions: !!overwrite, styleSelections, styleClassActions });
     if (!dryRun) lcSessions.set(sessionId, buf);   // keep session, chained on the fixed result (enables per-category iteration + re-scan)
 
     // Persist author-supplied asset mappings into every environment's asset-map CSV (per-env host),
@@ -3188,6 +3248,12 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
       status: 'manual review (class retained)',
       oldUrl: `${item.node} [${item.block}] ${item.prop}: ${item.unsupported.join(',')}`,
       newUrl: item.reason,
+    });
+    for (const item of styleKept) reportRows.push({
+      file: item.file, type: 'style-class-kept',
+      status: 'left as is (your choice)',
+      oldUrl: `${item.node} [${item.block}] ${item.prop}: ${item.classes.join(',')}`,
+      newUrl: 'The class stays in the dynamic field and will be flagged again on the next scan.',
     });
     for (const [reason, assets] of altSkips) for (const asset of assets)
       reportRows.push({ file: '', type: 'alt-text', status: reason, oldUrl: asset, newUrl: '' });
@@ -3218,6 +3284,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
     res.setHeader('X-Unmatched',    String(unmatched.length));
     res.setHeader('X-Style-Conflicts', String(styleConflicts.length));
     res.setHeader('X-Style-Manual', String(styleManual.length));
+    res.setHeader('X-Style-Kept', String(styleKept.length));
     res.setHeader('X-Style-Moved', String(counts['style-class-move'] || 0));
     res.setHeader('X-Hero-Height-Moved', String(counts['hero-height-move'] || 0));
     res.setHeader('X-Style-Resolved', String(counts['single-select-style-resolution'] || 0));
