@@ -859,9 +859,14 @@
         <div class="card-body">
           <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
             <div class="text-muted small" id="lcSummary">—</div>
-            <button class="btn btn-success" id="lcFixAllBtn" onclick="lcFix(null)">
-              <i class="bi bi-magic me-2"></i>Fix all &amp; download
-            </button>
+            <div class="d-flex gap-2">
+              <button class="btn btn-outline-primary" id="lcPreviewBtn" onclick="lcPreviewFix()" title="Show what Fix all would change — nothing is modified">
+                <i class="bi bi-eye me-2"></i>Preview Fix all
+              </button>
+              <button class="btn btn-success" id="lcFixAllBtn" onclick="lcFix(null)">
+                <i class="bi bi-magic me-2"></i>Fix all &amp; download
+              </button>
+            </div>
           </div>
           <div id="lcFixStatus" class="small mt-2"></div>
           <div id="lcDownloadRow" class="mt-2" style="display:none">
@@ -869,6 +874,7 @@
           </div>
         </div>
       </div>
+      <div id="lcFixPreview" style="display:none"></div>
 
       <!-- absolute domain picker (classify FIRST) -->
       <div class="card mb-3" id="lcDomainCard" style="display:none">
@@ -897,15 +903,17 @@
         <div class="card-body lc-collapse" id="lcBrokenBody"><div class="text-muted small">Not run yet.</div></div>
       </div>
 
-      <!-- image alt text refresh from DAM metadata -->
+      <!-- cardImageAlt refresh from DAM metadata -->
       <div class="card mb-3" id="lcAltCard" style="border-left:4px solid #198754">
         <div class="card-header d-flex align-items-center gap-2 flex-wrap">
-          <i class="bi bi-image text-success"></i><strong>Image alt text</strong>
-          <span class="text-muted small ms-1">— DAM description → title replaces existing image alt text, including preview package pages. If both are missing, authored alt is kept; filename fallback only fills empty/missing alt. Decorative images are skipped; failed lookups retain existing text.</span>
-          <button class="btn btn-sm btn-outline-success ms-auto" id="lcFillAltBtn" onclick="lcFixAlt()" title="Refresh from DAM description/title; retain authored alt if neither exists, otherwise fill empty/missing alt from the filename"><i class="bi bi-magic me-1"></i>Refresh alt text</button>
+          <i class="bi bi-image text-success"></i><strong>Card image alt text</strong>
+          <span class="text-muted small ms-1">— adds or updates <code>cardImageAlt</code> on each page's <code>jcr:content</code> from the DAM metadata of its <code>cardImage</code> (description → title). If both are missing, an authored alt is kept and the filename only fills an empty alt. No other image or block is touched. Preview first to review every change.</span>
+          <button class="btn btn-sm btn-outline-primary ms-auto" id="lcPreviewAltBtn" onclick="lcPreviewAlt()" title="Show every cardImageAlt that would be added or updated — nothing is changed"><i class="bi bi-eye me-1"></i>Preview alt text</button>
+          <button class="btn btn-sm btn-outline-success" id="lcFillAltBtn" onclick="lcFixAlt()" title="Add or update cardImageAlt from DAM description/title; keep an authored alt if neither exists"><i class="bi bi-magic me-1"></i>Refresh alt text</button>
           <div id="lcAltStatus" class="small w-100 mt-1"></div>
         </div>
       </div>
+      <div id="lcAltPreview" style="display:none"></div>
 
       <!-- unsupported dynamic classes and undeclared style fields -->
       <div class="card mb-3" id="lcStylesCard" style="display:none;border-left:4px solid #dc3545">
@@ -1340,7 +1348,7 @@
                   <li><strong>Environment:</strong> Pick the target environment — used for PDF / DAM / Scene7 → DM Open API lookups (from the asset-map built in the Image / Asset tool).</li>
                   <li><strong>Scan:</strong> A pass/fail card appears for each of the five checks, with counts and example links.</li>
                   <li><strong>Absolute domains:</strong> Tick the domains that are truly external (left as-is); the rest are treated as internal and re-rooted.</li>
-                  <li><strong>Fix:</strong> Click <em>Fix all</em>, or fix one category with its own <em>Fix</em> button. Downloads the patched ZIP + a change-report CSV.</li>
+                  <li><strong>Fix:</strong> Click <em>Preview Fix all</em> to see exactly what would change (nothing is modified), then <em>Fix all</em>, or fix one category with its own <em>Fix</em> button. Downloads the patched ZIP + a change-report CSV.</li>
                 </ol>
               </div>
               <div class="col-md-6">
@@ -1358,10 +1366,9 @@
                     <li>Only Franklin pages are checked. <code>META-INF</code>, <code>filter.xml</code>, redirects/config nodes and XML namespaces are excluded.</li>
                     <li>Content fragments and full cross-locale <code>/content/</code> links are recognised and left untouched (cross-locale links are listed for review).</li>
                     <li>Per-category fixes stack: fix one type, re-scan, fix another. Nothing changes unless it matches.</li>
-                    <li><em>Refresh alt text</em> and <em>Fix all</em> replace supported component image alt values from DAM <code>dc:description</code> → <code>dc:title</code>, even when already populated. If both are missing, existing authored alt is retained; filename fallback only fills empty/missing alt. Decorative images are skipped; failed lookups retain existing text and are reported.</li>
-                    <li>Alt refresh is a separate action on the <em>Image alt text</em> card; the Link Checker no longer reports accessibility findings. Caption filling is currently disabled. Rich-text <code>&lt;img alt&gt;</code> values are not rewritten.</li>
-                    <li>For Brightcove blocks (<code>brightcove</code>, <code>brightcove-video</code> or <code>custom-brightcove</code> component/model), <code>posterImage</code> uses <code>posterAccessibilityLabel</code>. Other blocks retain the normal <code>&lt;imageProperty&gt;Alt</code> naming.</li>
-                    <li>Preview package pages are included in explicit alt refresh, including <em>Fix all</em>. They remain excluded from ordinary QA scans and other fixes; drafts, config and navigation content remain excluded from alt refresh too.</li>
+                    <li><em>Preview alt text</em> lists every <code>cardImageAlt</code> that <em>Refresh alt text</em> and <em>Fix all</em> would add or update on each page's <code>jcr:content</code> (from the DAM <code>dc:description</code> → <code>dc:title</code> of its <code>cardImage</code>), with the current and new value, before anything changes. If both are missing, an authored alt is kept; the filename only fills an empty alt. Failed lookups retain existing text and are reported. No other image or block alt is touched.</li>
+                    <li>The Link Checker no longer reports accessibility findings. Caption filling is currently disabled.</li>
+                    <li>Preview package pages are included in alt refresh and <em>Fix all</em>. They remain excluded from ordinary QA scans and other fixes; drafts, config and navigation content are excluded too.</li>
                   </ul>
                 </div>
               </div>

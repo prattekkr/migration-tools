@@ -1411,6 +1411,12 @@ function lcRenderReport(data) {
   } else dc.style.display = 'none';
 
   lcResetBroken();
+  const staleFixPreview = document.getElementById('lcFixPreview');
+  if (staleFixPreview) { staleFixPreview.style.display = 'none'; staleFixPreview.innerHTML = ''; }
+  const staleAltPreview = document.getElementById('lcAltPreview');
+  if (staleAltPreview) { staleAltPreview.style.display = 'none'; staleAltPreview.innerHTML = ''; }
+  lcAltPreview = { data: null, status: 'all', text: '' };
+  lcPreview = { data: null, groups: [], text: '' };
   lcRenderStyles(data);
   lcRenderRobots(data);
   lcRenderCrossLocale();
@@ -1793,23 +1799,29 @@ function lcRenderAbsolute() {
   slot.innerHTML = lcCheckCard(LC_CHECKS[1], shown.length, shown);
 }
 
+// Build the request for Fix all (checks === null) or one category's Fix.
+function lcFixRequest(checks) {
+  const siteRoot = document.getElementById('lcSiteRoot').value.trim();
+  const env      = document.getElementById('lcEnv').value;
+  // checks === null → "Fix all": the 5 checks + image alt text, styles and robots, PLUS cross-locale when ready.
+  const mappings = lcCrossLocaleMappings();
+  let sel = checks;
+  if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'styles', 'robots', 'crossLocale']
+                                  : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'styles', 'robots'];
+  const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel };
+  if (sel.includes('styles')) body.styleSelections = lcStyleSelections();
+  if (sel.includes('crossLocale')) body.crossLocaleMappings = mappings;
+  if (sel.some(c => c === 'pdf' || c === 'dam' || c === 'scene7')) body.customAssetMappings = lcCustomAssetMappings();
+  return body;
+}
+
 // checks = array of check keys to fix, or null for all
 async function lcFix(checks) {
   if (!lcSessionId) { alert('Scan first.'); return; }
-  const siteRoot = document.getElementById('lcSiteRoot').value.trim();
-  const env      = document.getElementById('lcEnv').value;
   const status   = document.getElementById('lcFixStatus');
   status.className = 'small mt-2 text-muted'; status.textContent = 'Fixing…';
   try {
-    // checks === null → "Fix all": the 5 checks + image alt text, styles and robots, PLUS cross-locale when ready.
-    const mappings = lcCrossLocaleMappings();
-    let sel = checks;
-    if (!sel) sel = mappings.length ? ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'styles', 'robots', 'crossLocale']
-                                    : ['shortPath', 'absolute', 'pdf', 'dam', 'scene7', 'alt', 'styles', 'robots'];
-    const body = { sessionId: lcSessionId, siteRoot, env, internalDomains: lcInternalDomains(), checks: sel };
-    if (sel.includes('styles')) body.styleSelections = lcStyleSelections();
-    if (sel.includes('crossLocale')) body.crossLocaleMappings = mappings;
-    if (sel.some(c => c === 'pdf' || c === 'dam' || c === 'scene7')) body.customAssetMappings = lcCustomAssetMappings();
+    const body = lcFixRequest(checks);
     const res = await fetch('/api/link-checker/fix', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
@@ -1850,6 +1862,140 @@ async function lcFix(checks) {
   } catch (e) { status.className = 'small mt-2 text-danger'; status.textContent = e.message; }
 }
 
+// ── Fix all preview (dry run): what Fix all would change, without changing anything ──
+const LC_PREVIEW_TYPES = {
+  'short-path': { label: 'Short paths re-rooted', cls: 'bg-warning text-dark' },
+  'absolute': { label: 'Absolute URLs made internal', cls: 'bg-secondary' },
+  'cross-locale': { label: 'Cross-locale links re-pointed', cls: 'bg-secondary' },
+  'asset-dm': { label: 'Assets converted to DM URLs', cls: 'bg-danger' },
+  'alt-text': { label: 'Image alt text', cls: 'bg-success' },
+  'unsupported-style': { label: 'Styles: classes / fields removed', cls: 'bg-danger' },
+  'style-class-move': { label: 'Styles: body-unica classes moved', cls: 'bg-primary' },
+  'cta-default-cleanup': { label: 'Styles: default-cta removed', cls: 'bg-info' },
+  'hero-height-move': { label: 'Hero: height removed from item', cls: 'bg-primary' },
+  'hero-height-parent': { label: 'Hero: height set on hero-container', cls: 'bg-primary' },
+  'single-select-style-resolution': { label: 'Styles: single-select choice applied', cls: 'bg-info' },
+  'single-select-style-conflict': { label: 'Styles: single-select conflict', cls: 'bg-warning text-dark' },
+  'style-class-move-blocked': { label: 'Styles: class could not be moved', cls: 'bg-warning text-dark' },
+  'hero-height-blocked': { label: 'Hero: height needs manual move', cls: 'bg-warning text-dark' },
+  'robots-tags': { label: 'Robots tags added', cls: 'bg-secondary' },
+};
+let lcPreview = { data: null, groups: [], text: '' };
+
+function lcBuildPreviewGroups(rows) {
+  const order = Object.keys(LC_PREVIEW_TYPES);
+  const groups = new Map();
+  for (const row of rows) {
+    const changed = String(row.status || '').startsWith('changed');
+    const key = `${changed ? 'c' : 'a'}|${row.type}|${changed ? '' : row.status}`;
+    if (!groups.has(key)) {
+      const meta = LC_PREVIEW_TYPES[row.type] || { label: row.type, cls: 'bg-secondary' };
+      groups.set(key, { changed, type: row.type, label: changed ? meta.label : `${meta.label} — ${row.status}`, cls: changed ? meta.cls : 'bg-warning text-dark', rows: [], files: new Set() });
+    }
+    const group = groups.get(key);
+    group.rows.push(row);
+    if (row.file) group.files.add(row.file);
+  }
+  const rank = type => { const i = order.indexOf(type); return i < 0 ? order.length : i; };
+  return [...groups.values()].sort((a, b) => Number(b.changed) - Number(a.changed) || rank(a.type) - rank(b.type) || b.rows.length - a.rows.length);
+}
+
+function lcShortPage(file) {
+  return String(file || '').replace(/^.*?\/abbvie-com\//, '').replace(/\/\.content\.xml$/, '') || String(file || '');
+}
+
+function lcPreviewRowMatches(row) {
+  const text = lcPreview.text;
+  return !text || `${row.file} ${row.oldUrl} ${row.newUrl}`.toLowerCase().includes(text);
+}
+
+async function lcPreviewFix() {
+  if (!lcSessionId) { alert('Scan first.'); return; }
+  const btn = document.getElementById('lcPreviewBtn');
+  const status = document.getElementById('lcFixStatus');
+  const label = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Previewing…';
+  status.className = 'small mt-2 text-muted';
+  status.textContent = 'Building the preview — nothing is being changed…';
+  try {
+    const body = lcFixRequest(null);
+    body.dryRun = true;
+    const res = await fetch('/api/link-checker/fix', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Preview failed');
+    lcPreview = { data, groups: lcBuildPreviewGroups(data.rows || []), text: '' };
+    status.textContent = '';
+    lcRenderFixPreview();
+  } catch (e) { status.className = 'small mt-2 text-danger'; status.textContent = e.message; }
+  finally { btn.disabled = false; btn.innerHTML = label; }
+}
+
+function lcRenderFixPreview() {
+  const data = lcPreview.data;
+  const host = document.getElementById('lcFixPreview');
+  if (!data) return;
+  host.style.display = '';
+  const changed = lcPreview.groups.filter(g => g.changed).reduce((sum, g) => sum + g.rows.length, 0);
+  const attention = lcPreview.groups.filter(g => !g.changed).reduce((sum, g) => sum + g.rows.length, 0);
+  const summary = changed
+    ? `Fix all would make <strong>${changed}</strong> change(s) across <strong>${data.pagesWouldChange}</strong> page(s).`
+    : 'Fix all would not change anything.';
+  host.innerHTML = `
+    <div class="card mb-3" style="border-left:4px solid #fd7e14">
+      <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+        <i class="bi bi-eye text-warning"></i><strong>Fix all preview</strong>
+        <span class="text-muted small ms-1">— nothing has been changed. Review, then click Fix all.</span>
+        ${data.reportId ? `<a class="btn btn-sm btn-outline-secondary ms-auto" href="/api/link-checker/fix-report/${escHtml(data.reportId)}"><i class="bi bi-download me-1"></i>Download full report (CSV)</a>` : ''}
+        <button type="button" class="btn btn-sm btn-link text-muted p-0" title="Close preview" onclick="document.getElementById('lcFixPreview').style.display='none'"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <div class="card-body">
+        <div class="mb-1">${summary}${attention ? ` <span class="text-warning">${attention} item(s) need your attention and will not be changed.</span>` : ''}</div>
+        ${data.truncated ? `<div class="small text-muted mb-1">Showing the first ${(data.rows || []).length} of ${data.rowsTotal} rows — download the CSV for all.</div>` : ''}
+        <input type="search" class="form-control form-control-sm my-2" id="lcPreviewFilter" placeholder="Filter by page, old value or new value…" oninput="lcSetPreviewText(this.value)" />
+        <div id="lcPreviewGroups"></div>
+      </div>
+    </div>`;
+  lcRenderPreviewGroups();
+}
+
+function lcSetPreviewText(text) { lcPreview.text = String(text || '').trim().toLowerCase(); lcRenderPreviewGroups(); }
+
+function lcRenderPreviewGroups() {
+  const sections = [[true, 'Changes'], [false, 'Needs your attention — not changed']];
+  const html = sections.map(([changed, title]) => {
+    const items = lcPreview.groups.map((group, index) => ({ group, index })).filter(({ group }) => group.changed === changed)
+      .map(({ group, index }) => ({ group, index, count: group.rows.filter(lcPreviewRowMatches).length })).filter(item => item.count);
+    if (!items.length) return '';
+    return `<div class="fw-semibold small text-uppercase text-muted mt-2 mb-1">${title}</div>` + items.map(({ group, index, count }) => `
+      <details class="border rounded mb-2" ontoggle="if(this.open)lcPreviewOpen(${index})">
+        <summary class="p-2 d-flex align-items-center gap-2 flex-wrap" style="cursor:pointer">
+          <span class="badge ${group.cls}">${escHtml(group.label)}</span>
+          <span class="text-muted small ms-auto">${count} item(s)${group.files.size ? ` · ${group.files.size} page(s)` : ''}</span>
+        </summary>
+        <div class="px-3 pb-2" id="lcPreviewRows${index}"></div>
+      </details>`).join('');
+  }).join('');
+  const target = document.getElementById('lcPreviewGroups');
+  if (target) target.innerHTML = html || '<div class="text-muted small">No rows match the filter.</div>';
+}
+
+// Rows for one group, rendered on demand and in pages so thousands of rows stay responsive.
+function lcPreviewOpen(index, limit = 50) {
+  const group = lcPreview.groups[index];
+  const target = document.getElementById(`lcPreviewRows${index}`);
+  if (!group || !target) return;
+  const rows = group.rows.filter(lcPreviewRowMatches);
+  target.innerHTML = rows.slice(0, limit).map(row => `
+    <div class="py-1 border-top small">
+      ${row.file ? `<code class="text-secondary" style="word-break:break-all" title="${escHtml(row.file)}">${escHtml(lcShortPage(row.file))}</code>` : ''}
+      <div><code class="text-muted" style="word-break:break-all">${escHtml(row.oldUrl)}</code></div>
+      ${row.newUrl ? `<div><i class="bi bi-arrow-return-right text-muted me-1"></i><code class="text-success" style="word-break:break-all">${escHtml(row.newUrl)}</code></div>` : ''}
+    </div>`).join('') +
+    (rows.length > limit ? `<button type="button" class="btn btn-sm btn-link p-0 mt-1" onclick="lcPreviewOpen(${index}, ${limit + 100})">Show more (${rows.length - limit} more)</button>` : '');
+}
+
 // Refresh existing, empty and missing image alt text from DAM metadata.
 async function lcFixAlt() {
   if (!lcSessionId) { alert('Scan first.'); return; }
@@ -1876,12 +2022,129 @@ async function lcFixAlt() {
     const a = document.createElement('a'); a.href = url; a.download = 'alt-fixed-package.zip'; a.click();
     URL.revokeObjectURL(url);
     status.className = 'small w-100 mt-1 text-success';
-    status.innerHTML = `✓ Refreshed <strong>${filled}</strong> alt value(s) across ${pages} page(s)` +
+    status.innerHTML = `✓ Refreshed <strong>${filled}</strong> cardImageAlt value(s) across ${pages} page(s)` +
       (skipped > 0 ? `, ${skipped} asset(s) skipped; existing text retained (see report)` : '') + `. ZIP downloaded.` +
       (reportId ? ` — <a href="/api/link-checker/fix-report/${reportId}">download report CSV</a>` : '');
     await lcScan();   // refresh — session now holds the alt-filled package
   } catch (e) { status.className = 'small w-100 mt-1 text-danger'; status.textContent = e.message; }
   finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-magic me-1"></i>Refresh alt text'; }
+}
+
+// ── cardImageAlt preview: what Refresh alt text would add / update, before anything changes ──
+let lcAltPreview = { data: null, status: 'all', text: '' };
+const LC_ALT_STATUS = {
+  added: { label: 'Added', cls: 'bg-success' },
+  updated: { label: 'Updated', cls: 'bg-primary' },
+  kept: { label: 'Kept (no DAM text)', cls: 'bg-secondary' },
+  attention: { label: 'Needs attention', cls: 'bg-warning text-dark' },
+};
+
+function lcAltStatusKey(row) {
+  const status = String(row.status || '');
+  if (status === 'alt added') return 'added';
+  if (status === 'alt updated') return 'updated';
+  if (status.startsWith('kept')) return 'kept';
+  return 'attention';
+}
+
+async function lcPreviewAlt() {
+  if (!lcSessionId) { alert('Scan first.'); return; }
+  const siteRoot = document.getElementById('lcSiteRoot').value.trim();
+  const env      = document.getElementById('lcEnv').value;
+  const btn      = document.getElementById('lcPreviewAltBtn');
+  const status   = document.getElementById('lcAltStatus');
+  if (!env) { status.className = 'small w-100 mt-1 text-danger'; status.textContent = 'Select a target environment first — needed to read the DAM metadata.'; return; }
+  const label = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Previewing…';
+  status.className = 'small w-100 mt-1 text-muted';
+  status.textContent = 'Reading DAM metadata — nothing is being changed…';
+  try {
+    const res = await fetch('/api/link-checker/fix-alt', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: lcSessionId, siteRoot, env, dryRun: true }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Preview failed');
+    lcAltPreview = { data, status: 'all', text: '' };
+    status.textContent = '';
+    lcRenderAltPreview();
+  } catch (e) { status.className = 'small w-100 mt-1 text-danger'; status.textContent = e.message; }
+  finally { btn.disabled = false; btn.innerHTML = label; }
+}
+
+function lcSetAltPreviewStatus(key) { lcAltPreview.status = key; lcRenderAltPreviewRows(); lcRenderAltPreviewChips(); }
+function lcSetAltPreviewText(text) { lcAltPreview.text = String(text || '').trim().toLowerCase(); lcRenderAltPreviewRows(); }
+
+function lcAltPreviewVisible(row) {
+  const view = lcAltPreview;
+  if (view.status !== 'all' && lcAltStatusKey(row) !== view.status) return false;
+  return !view.text || `${row.file} ${row.image} ${row.currentAlt} ${row.newAlt}`.toLowerCase().includes(view.text);
+}
+
+function lcRenderAltPreviewChips() {
+  const rows = (lcAltPreview.data && lcAltPreview.data.rows) || [];
+  const counts = { added: 0, updated: 0, kept: 0, attention: 0 };
+  for (const row of rows) counts[lcAltStatusKey(row)]++;
+  const chip = (key, label, n) =>
+    `<button type="button" class="btn btn-sm ${lcAltPreview.status === key ? 'btn-dark' : 'btn-outline-secondary'} me-1 mb-1" onclick="lcSetAltPreviewStatus('${key}')">${escHtml(label)} <span class="badge bg-secondary ms-1">${n}</span></button>`;
+  const target = document.getElementById('lcAltPreviewChips');
+  if (target) target.innerHTML = chip('all', 'All', rows.length) + Object.keys(LC_ALT_STATUS).map(key => chip(key, LC_ALT_STATUS[key].label, counts[key])).join('');
+}
+
+function lcRenderAltPreview() {
+  const data = lcAltPreview.data;
+  const host = document.getElementById('lcAltPreview');
+  if (!data) return;
+  host.style.display = '';
+  const counts = data.counts || { added: 0, updated: 0, kept: 0, skipped: 0 };
+  const summary = counts.added + counts.updated
+    ? `Refresh alt text would <strong>add ${counts.added}</strong> and <strong>update ${counts.updated}</strong> cardImageAlt value(s) across <strong>${data.pagesWouldChange}</strong> page(s).`
+    : 'Refresh alt text would not change any cardImageAlt.';
+  host.innerHTML = `
+    <div class="card mb-3" style="border-left:4px solid #fd7e14">
+      <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+        <i class="bi bi-eye text-warning"></i><strong>cardImageAlt preview</strong>
+        <span class="text-muted small ms-1">— nothing has been changed. Review, then click Refresh alt text.</span>
+        ${data.reportId ? `<a class="btn btn-sm btn-outline-secondary ms-auto" href="/api/link-checker/fix-report/${escHtml(data.reportId)}"><i class="bi bi-download me-1"></i>Download report (CSV)</a>` : ''}
+        <button type="button" class="btn btn-sm btn-link text-muted p-0" title="Close preview" onclick="document.getElementById('lcAltPreview').style.display='none'"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <div class="card-body">
+        <div class="mb-2">${summary}</div>
+        ${data.truncated ? `<div class="small text-muted mb-1">Showing the first ${(data.rows || []).length} of ${data.rowsTotal} rows — download the CSV for all.</div>` : ''}
+        <div id="lcAltPreviewChips" class="mb-1"></div>
+        <input type="search" class="form-control form-control-sm mb-2" id="lcAltPreviewFilter" placeholder="Filter by page, image, current or new alt…" oninput="lcSetAltPreviewText(this.value)" />
+        <div id="lcAltPreviewRows"></div>
+      </div>
+    </div>`;
+  lcRenderAltPreviewChips();
+  lcRenderAltPreviewRows();
+}
+
+function lcRenderAltPreviewRows(limit = 500) {
+  const rows = ((lcAltPreview.data && lcAltPreview.data.rows) || []).filter(lcAltPreviewVisible);
+  const imageName = value => { try { return decodeURIComponent(String(value || '').split(/[?#]/)[0].split('/').filter(Boolean).pop() || ''); } catch { return String(value || ''); } };
+  const body = rows.slice(0, limit).map(row => {
+    const meta = LC_ALT_STATUS[lcAltStatusKey(row)];
+    const showStatus = lcAltStatusKey(row) === 'attention' ? ` <span class="text-muted">${escHtml(row.status)}</span>` : '';
+    return `<tr>
+      <td style="word-break:break-all"><code class="small text-secondary" title="${escHtml(row.file)}">${escHtml(lcShortPage(row.file))}</code></td>
+      <td style="word-break:break-all"><span title="${escHtml(row.image)}">${escHtml(imageName(row.image))}</span></td>
+      <td class="text-muted">${escHtml(row.currentAlt) || '<em>none</em>'}</td>
+      <td class="text-success">${escHtml(row.newAlt)}</td>
+      <td class="text-nowrap">${escHtml(row.source)}</td>
+      <td class="text-nowrap"><span class="badge ${meta.cls}">${escHtml(meta.label)}</span>${showStatus}</td>
+    </tr>`;
+  }).join('');
+  const target = document.getElementById('lcAltPreviewRows');
+  if (!target) return;
+  target.innerHTML = rows.length ? `
+    <div style="max-height:440px;overflow:auto">
+      <table class="table table-sm table-hover small mb-0">
+        <thead class="table-light" style="position:sticky;top:0"><tr><th>Page</th><th>Image</th><th>Current cardImageAlt</th><th>New cardImageAlt</th><th>Source</th><th>Status</th></tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>${rows.length > limit ? `<div class="small text-muted mt-1">Showing ${limit} of ${rows.length} matching rows — narrow the filter or download the CSV.</div>` : ''}`
+    : '<div class="text-muted small">No rows match.</div>';
 }
 
 // ─── Migration QA report (dry-run preview) ────────────────────────────────────

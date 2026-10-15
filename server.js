@@ -2937,6 +2937,13 @@ function normalizeDeliveryUrls(s) {
 // Caption filling is disabled pending a rule review; the code is kept so it can be re-enabled.
 const LC_CAPTION_FILL_ENABLED = false;
 
+// Report wording for the alt value that is being replaced (stored XML-escaped).
+function altWasLabel(oldAlt) {
+  if (oldAlt === undefined) return 'missing';
+  if (!String(oldAlt).trim()) return 'empty';
+  return `"${String(oldAlt).replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')}"`;
+}
+
 // Apply all QA fixes to every Franklin page in the ZIP (nested or flat).
 // Order: absolute → asset→DM → short-paths (so each step's output is safe for the next).
 async function buildQaFixedZip(buffer, opts) {
@@ -2980,7 +2987,7 @@ async function buildQaFixedZip(buffer, opts) {
           body = unmaskProtected(body, protectedVals);   // restore cq:template/tags/MSM refs before writing back
           const rob = qaPage && doRobots ? qaFixRobotsTags(pre + body + post, robotsPagePath(file), robotsMap) : { result: pre + body + post, changes: [] };
           const after = qaPage ? sanitizeXmlEntities(normalizeDeliveryUrls(rob.result)) : rob.result;
-          for (const ch of al.changes) changes.push({ file, type: 'alt-text', oldUrl: ch.value, newUrl: `${ch.altProp}="${ch.alt}"` });
+          for (const ch of al.changes) changes.push({ file, type: 'alt-text', oldUrl: ch.value, newUrl: `${ch.altProp}="${ch.alt}" (was ${altWasLabel(ch.oldAlt)})` });
           for (const ch of cp.changes) changes.push({ file, type: 'caption',  oldUrl: ch.value, newUrl: `caption="${ch.caption}"` });
           for (const ch of a.changes) changes.push({ file, type: 'absolute',     ...ch });
           for (const ch of st.changes) changes.push(styleChangeRow(file, ch));
@@ -3053,6 +3060,9 @@ function collectUnresolvedDamPaths(buffer, pathMap, damNorm, which) {
 // ── Fix: apply the QA fixes and return the patched ZIP + change report ────────
 app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, res) => {
   const { sessionId, siteRoot, env, internalDomains, checks, overwrite } = req.body;
+  if (req.body.dryRun !== undefined && typeof req.body.dryRun !== 'boolean')
+    return res.status(400).json({ error: 'dryRun must be true or false.' });
+  const dryRun = req.body.dryRun === true;   // preview: same logic, no session / asset-map changes
   const buffer = lcSessions.get(sessionId);
   if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
   if (!siteRoot || !siteRoot.startsWith('/content/')) return res.status(400).json({ error: 'Enter a valid site root.' });
@@ -3130,7 +3140,7 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
           username: appConfig?.target?.username, password: appConfig?.target?.password,
         }, msg => console.log('[link-checker fix]', msg));
         if (recovered.length) {
-          persistAssetRowsAllEnvs(recovered);   // sync AEM-author-confirmed mappings to every env's CSV (per-env host)
+          if (!dryRun) persistAssetRowsAllEnvs(recovered);   // sync AEM-author-confirmed mappings to every env's CSV (per-env host)
           recoveredPaths = new Set(recovered.map(r => r.path));
         }
       }
@@ -3151,12 +3161,12 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
     }
 
     const { buf, changes, unmatched, pagesFixed, styleConflicts, styleManual } = await buildQaFixedZip(buffer, { siteRoot: R, internalHosts, pathMap, scene7Map, damNorm, checks: sel, crossLocaleMappings, customAssetMappings, altByValue, captionByValue, overwriteCaptions: !!overwrite, styleSelections });
-    lcSessions.set(sessionId, buf);   // keep session, chained on the fixed result (enables per-category iteration + re-scan)
+    if (!dryRun) lcSessions.set(sessionId, buf);   // keep session, chained on the fixed result (enables per-category iteration + re-scan)
 
     // Persist author-supplied asset mappings into every environment's asset-map CSV (per-env host),
     // so the manual mapping is captured once and reused across dev/test/stage/prod.
     let persisted = { count: 0, envs: [] };
-    if (customAssetMappings.length) {
+    if (customAssetMappings.length && !dryRun) {
       try { persisted = persistCustomMappingsAllEnvs(customAssetMappings); }
       catch (e) { console.warn('[link-checker fix] custom-mapping persist failed:', e.message); }
     }
@@ -3190,6 +3200,17 @@ app.post('/api/link-checker/fix', express.json({ limit: '2mb' }), async (req, re
     setTimeout(() => lcReports.delete(reportId), 15 * 60 * 1000).unref?.();
 
     const counts = changes.reduce((a, c) => (a[c.type] = (a[c.type] || 0) + 1, a), {});
+    if (dryRun) {
+      const ROW_LIMIT = 20000;
+      return res.json({
+        dryRun: true, pagesWouldChange: pagesFixed, changeCount: changes.length, counts,
+        unmatched: unmatched.length, styleConflicts: styleConflicts.length, styleManual: styleManual.length,
+        altSkipped: [...altSkips.values()].reduce((sum, assets) => sum + assets.size, 0),
+        recovered: recoveredPaths.size,
+        rowsTotal: reportRows.length, truncated: reportRows.length > ROW_LIMIT,
+        rows: reportRows.slice(0, ROW_LIMIT), reportId,
+      });
+    }
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="qa-fixed-package.zip"');
     res.setHeader('X-Pages-Fixed',  String(pagesFixed));
@@ -3479,10 +3500,16 @@ async function fetchDamAltText(damPaths, cfg) {
   return map;
 }
 
+// Alt text is limited to the page-level card image: cardImage → cardImageAlt on jcr:content.
+// Set to null to cover every supported image property (used by the generic-engine tests).
+let ALT_TARGETS = [{ node: 'jcr:content', prop: 'cardimage' }];
+const isAltTarget = (node, item) => !ALT_TARGETS || ALT_TARGETS.some(t => t.node === node && t.prop === item.prop.toLowerCase());
+const xmlAttrUnescape = s => String(s).replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
 // DAM description/title override authored alt; filenames only fill unlabelled images.
-// A legacy plain alt is also refreshed on single-image nodes.
+// A legacy plain alt is also refreshed on single-image nodes when the targets are unrestricted.
 function qaFixAltText(xml, altByValue) {
-  const changes = [];
+  const changes = [], kept = [];
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
   const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const result = xml.replace(elRe, (full, node, attrStr, tail) => {
@@ -3490,12 +3517,16 @@ function qaFixAltText(xml, altByValue) {
     while ((a = aRe.exec(attrStr))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
     if (isDecorativeImage(attrs)) return full;                                // never add alt to a decorative image
     let out = attrStr, changed = false;
-    const items = imageAltProps(attrs, raw);
+    const items = imageAltProps(attrs, raw).filter(it => isAltTarget(node, it));
+    const legacyAlt = !ALT_TARGETS && items.length === 1;
     for (const it of items) {
       const metadata = altByValue.get(it.value);
       if (!metadata) continue;
-      const authoredAlt = (it.altValue || '').trim() || (items.length === 1 && (attrs.alt || '').trim());
-      if (metadata.source === 'filename' && authoredAlt) continue;
+      const authoredAlt = (it.altValue || '').trim() || (legacyAlt && (attrs.alt || '').trim());
+      if (metadata.source === 'filename' && authoredAlt) {
+        kept.push({ node, value: it.value, prop: it.prop, altProp: it.altRaw, oldAlt: (it.altValue || '').trim() ? it.altValue : attrs.alt });
+        continue;
+      }
       const title = metadata.text;
       const val = xmlAttrEscape(title);
       if (it.altValue !== val) {
@@ -3503,18 +3534,18 @@ function qaFixAltText(xml, altByValue) {
           out = out.replace(new RegExp('(\\s' + esc(it.altKey) + '=")[^"]*(")', 'i'), (_, prefix, suffix) => prefix + val + suffix);
         else
           out += ` ${it.altRaw}="${val}"`;
-        changes.push({ node, value: it.value, prop: it.prop, altProp: it.altRaw, alt: title });
+        changes.push({ node, value: it.value, prop: it.prop, altProp: it.altRaw, alt: title, oldAlt: it.altValue, source: metadata.source });
         changed = true;
       }
-      if (items.length === 1 && attrs.alt !== undefined && attrs.alt !== val) {
+      if (legacyAlt && attrs.alt !== undefined && attrs.alt !== val) {
         out = out.replace(/(\salt=")[^"]*(")/i, (_, prefix, suffix) => prefix + val + suffix);
-        changes.push({ node, value: it.value, prop: it.prop, altProp: raw.alt, alt: title });
+        changes.push({ node, value: it.value, prop: it.prop, altProp: raw.alt, alt: title, oldAlt: attrs.alt, source: metadata.source });
         changed = true;
       }
     }
     return changed ? `<${node}${out}${tail}>` : full;
   });
-  return { result, changes };
+  return { result, changes, kept };
 }
 
 // Fill `caption` on custom-image blocks (only) whose caption is empty/absent, using
@@ -3545,7 +3576,7 @@ function qaFixCaption(xml, captionByValue, overwrite) {
 async function buildMetaFixedZip(buffer, fixerFn, { includePreview = false } = {}) {
   const outerAdm   = new AdmZip(buffer);
   const innerEntry = outerAdm.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
-  const changes = [];
+  const changes = [], kept = [];
   let pagesFixed = 0;
 
   async function patch(adm) {
@@ -3562,6 +3593,7 @@ async function buildMetaFixedZip(buffer, fixerFn, { includePreview = false } = {
           const assembled = pre + unmaskProtected(r.result, protectedVals) + post;
           const after = lcIsSkipped(name) ? assembled : sanitizeXmlEntities(normalizeDeliveryUrls(assembled));
           for (const ch of r.changes) changes.push({ file, ...ch });
+          for (const k of (r.kept || [])) kept.push({ file, ...k });
           if (after !== before) pagesFixed++;
           jsz.file(name, after);
           continue;
@@ -3579,9 +3611,9 @@ async function buildMetaFixedZip(buffer, fixerFn, { includePreview = false } = {
       if (e.isDirectory) continue;
       outerJsz.file(e.entryName, e.entryName === innerEntry.entryName ? patchedInner : e.getData());
     }
-    return { buf: await outerJsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), changes, pagesFixed };
+    return { buf: await outerJsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), changes, kept, pagesFixed };
   }
-  return { buf: await patch(outerAdm), changes, pagesFixed };
+  return { buf: await patch(outerAdm), changes, kept, pagesFixed };
 }
 
 // Shared alt-refresh computation: scan all non-decorative component images,
@@ -3607,7 +3639,7 @@ async function computeAltFills(buffer, uuidToRow, damNorm, hostCfg) {
       const attrs = {}, raw = {}; let a; const aRe = /([\w:.\-]+)="([^"]*)"/g;
       while ((a = aRe.exec(m[2]))) { const ln = a[1].toLowerCase(); attrs[ln] = a[2]; raw[ln] = a[1]; }
       if (isDecorativeImage(attrs)) continue;
-      for (const it of imageAltProps(attrs, raw)) {
+      for (const it of imageAltProps(attrs, raw).filter(item => isAltTarget(m[1], item))) {
         candidateTotal++;
         const dam = altResolveDamPath(it.value, uuidToRow, damNorm);
         if (!dam) { addSkip('not in asset-map (cannot locate /content/dam path)', it.value); continue; }
@@ -3721,10 +3753,13 @@ app.post('/api/link-checker/refresh-style-vocab', express.json({ limit: '1mb' })
   }
 });
 
-// POST /api/link-checker/fix-alt — refresh existing, empty and missing component
-// alt text from DAM metadata (description → title → filename).
+// POST /api/link-checker/fix-alt — add/update cardImageAlt on jcr:content from DAM metadata
+// (description → title; filename only fills an empty alt). dryRun:true returns the report only.
 app.post('/api/link-checker/fix-alt', express.json({ limit: '1mb' }), async (req, res) => {
   const { sessionId, siteRoot, env } = req.body;
+  if (req.body.dryRun !== undefined && typeof req.body.dryRun !== 'boolean')
+    return res.status(400).json({ error: 'dryRun must be true or false.' });
+  const dryRun = req.body.dryRun === true;
   const buffer = lcSessions.get(sessionId);
   if (!buffer) return res.status(404).json({ error: 'Session expired — re-upload the ZIP.' });
   if (!siteRoot || !siteRoot.startsWith('/content/')) return res.status(400).json({ error: 'Enter a valid site root.' });
@@ -3741,21 +3776,41 @@ app.post('/api/link-checker/fix-alt', express.json({ limit: '1mb' }), async (req
     const { altByValue, missingTotal, skips } = await computeAltFills(buffer, uuidToRow, damNorm,
       { host, username: appConfig?.target?.username, password: appConfig?.target?.password });
 
-    const { buf, changes, pagesFixed } = await buildMetaFixedZip(buffer, region => qaFixAltText(region, altByValue), { includePreview: true });
+    const { buf, changes, kept, pagesFixed } = await buildMetaFixedZip(buffer, region => qaFixAltText(region, altByValue), { includePreview: true });
 
-    // Change report CSV.
-    const reportRows = changes.map(c => ({ file: c.file, node: c.node, altProp: c.altProp, image: c.value, alt: c.alt, status: 'alt refreshed' }));
-    for (const [reason, set] of skips) for (const asset of set) reportRows.push({ file: '', node: '', altProp: '', image: asset, alt: '', status: reason });
+    // Change report: one row per cardImageAlt that is added, updated, kept or skipped.
+    const sourceLabel = { description: 'DAM description', title: 'DAM title', filename: 'filename' };
+    const reportRows = changes.map(c => ({
+      file: c.file, node: c.node, altProp: c.altProp, image: c.value,
+      currentAlt: c.oldAlt === undefined ? '' : xmlAttrUnescape(c.oldAlt), newAlt: c.alt,
+      source: sourceLabel[c.source] || '',
+      status: c.oldAlt === undefined || !String(c.oldAlt).trim() ? 'alt added' : 'alt updated',
+    }));
+    for (const k of kept) reportRows.push({
+      file: k.file, node: k.node, altProp: k.altProp, image: k.value,
+      currentAlt: xmlAttrUnescape(k.oldAlt || ''), newAlt: '', source: '', status: 'kept — DAM has no description or title',
+    });
+    for (const [reason, set] of skips) for (const asset of set)
+      reportRows.push({ file: '', node: '', altProp: '', image: asset, currentAlt: '', newAlt: '', source: '', status: reason });
     const reportCsv = stringify(reportRows, { header: true, columns: [
       { key: 'file', header: 'file' }, { key: 'node', header: 'component' }, { key: 'altProp', header: 'alt_property' },
-      { key: 'image', header: 'image' }, { key: 'alt', header: 'alt_text' }, { key: 'status', header: 'status' },
+      { key: 'image', header: 'image' }, { key: 'currentAlt', header: 'current_alt' }, { key: 'newAlt', header: 'alt_text' },
+      { key: 'source', header: 'source' }, { key: 'status', header: 'status' },
     ] });
     const reportId = randomUUID();
     lcReports.set(reportId, reportCsv);
     setTimeout(() => lcReports.delete(reportId), 15 * 60 * 1000).unref?.();
 
-    if (changes.length) lcSessions.set(sessionId, buf);   // chain so a re-scan reflects the filled alts
     const skippedCount = [...skips.values()].reduce((s, set) => s + set.size, 0);
+    if (dryRun) {
+      const ROW_LIMIT = 20000;
+      return res.json({
+        dryRun: true, pagesWouldChange: pagesFixed,
+        counts: { added: reportRows.filter(r => r.status === 'alt added').length, updated: reportRows.filter(r => r.status === 'alt updated').length, kept: kept.length, skipped: skippedCount },
+        rowsTotal: reportRows.length, truncated: reportRows.length > ROW_LIMIT, rows: reportRows.slice(0, ROW_LIMIT), reportId,
+      });
+    }
+    if (changes.length) lcSessions.set(sessionId, buf);   // chain so a re-scan reflects the filled alts
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="alt-fixed-package.zip"');
     res.setHeader('X-Pages-Fixed',  String(pagesFixed));
