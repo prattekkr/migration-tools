@@ -907,7 +907,7 @@
       <div class="card mb-3" id="lcAltCard" style="border-left:4px solid #198754">
         <div class="card-header d-flex align-items-center gap-2 flex-wrap">
           <i class="bi bi-image text-success"></i><strong>Card image alt text</strong>
-          <span class="text-muted small ms-1">— adds or updates <code>cardImageAlt</code> on each page's <code>jcr:content</code> from the DAM metadata of its <code>cardImage</code> (description → title). If both are missing, an authored alt is kept and the filename only fills an empty alt. No other image or block is touched. Preview first to review every change.</span>
+          <span class="text-muted small ms-1">— adds or updates <code>cardImageAlt</code> on each page's <code>jcr:content</code> from the DAM metadata of its <code>cardImage</code> (description → title). Only the DAM <code>dc:description</code> and <code>dc:title</code> fields are read; AI-generated (<code>autogen:*</code>) text is never used. If both are empty, an authored alt is kept and the filename only fills an empty alt. No other image or block is touched. Preview first to review every change.</span>
           <button class="btn btn-sm btn-outline-primary ms-auto" id="lcPreviewAltBtn" onclick="lcPreviewAlt()" title="Show every cardImageAlt that would be added or updated — nothing is changed"><i class="bi bi-eye me-1"></i>Preview alt text</button>
           <button class="btn btn-sm btn-outline-success" id="lcFillAltBtn" onclick="lcFixAlt()" title="Add or update cardImageAlt from DAM description/title; keep an authored alt if neither exists"><i class="bi bi-magic me-1"></i>Refresh alt text</button>
           <div id="lcAltStatus" class="small w-100 mt-1"></div>

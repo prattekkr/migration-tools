@@ -2088,10 +2088,11 @@ async function lcFixAlt() {
 // ── cardImageAlt preview: what Refresh alt text would add / update, before anything changes ──
 let lcAltPreview = { data: null, status: 'all', text: '' };
 const LC_ALT_STATUS = {
-  added: { label: 'Added', cls: 'bg-success' },
-  updated: { label: 'Updated', cls: 'bg-primary' },
-  kept: { label: 'Kept (no DAM text)', cls: 'bg-secondary' },
-  attention: { label: 'Needs attention', cls: 'bg-warning text-dark' },
+  added: { label: 'Will be added', cls: 'bg-success' },
+  updated: { label: 'Will be updated', cls: 'bg-primary' },
+  kept: { label: 'Kept as authored', cls: 'bg-secondary' },
+  same: { label: 'Already correct', cls: 'bg-light text-dark border' },
+  attention: { label: 'Not changed — needs attention', cls: 'bg-warning text-dark' },
 };
 
 function lcAltStatusKey(row) {
@@ -2099,9 +2100,9 @@ function lcAltStatusKey(row) {
   if (status === 'alt added') return 'added';
   if (status === 'alt updated') return 'updated';
   if (status.startsWith('kept')) return 'kept';
+  if (status.startsWith('unchanged')) return 'same';
   return 'attention';
 }
-
 async function lcPreviewAlt() {
   if (!lcSessionId) { alert('Scan first.'); return; }
   const siteRoot = document.getElementById('lcSiteRoot').value.trim();
@@ -2133,12 +2134,12 @@ function lcSetAltPreviewText(text) { lcAltPreview.text = String(text || '').trim
 function lcAltPreviewVisible(row) {
   const view = lcAltPreview;
   if (view.status !== 'all' && lcAltStatusKey(row) !== view.status) return false;
-  return !view.text || `${row.file} ${row.image} ${row.currentAlt} ${row.newAlt}`.toLowerCase().includes(view.text);
+  return !view.text || `${row.file} ${row.image} ${row.currentAlt} ${row.finalAlt} ${row.source} ${row.status}`.toLowerCase().includes(view.text);
 }
 
 function lcRenderAltPreviewChips() {
   const rows = (lcAltPreview.data && lcAltPreview.data.rows) || [];
-  const counts = { added: 0, updated: 0, kept: 0, attention: 0 };
+  const counts = { added: 0, updated: 0, kept: 0, same: 0, attention: 0 };
   for (const row of rows) counts[lcAltStatusKey(row)]++;
   const chip = (key, label, n) =>
     `<button type="button" class="btn btn-sm ${lcAltPreview.status === key ? 'btn-dark' : 'btn-outline-secondary'} me-1 mb-1" onclick="lcSetAltPreviewStatus('${key}')">${escHtml(label)} <span class="badge bg-secondary ms-1">${n}</span></button>`;
@@ -2151,15 +2152,21 @@ function lcRenderAltPreview() {
   const host = document.getElementById('lcAltPreview');
   if (!data) return;
   host.style.display = '';
-  const counts = data.counts || { added: 0, updated: 0, kept: 0, skipped: 0 };
-  const summary = counts.added + counts.updated
-    ? `Refresh alt text would <strong>add ${counts.added}</strong> and <strong>update ${counts.updated}</strong> cardImageAlt value(s) across <strong>${data.pagesWouldChange}</strong> page(s).`
-    : 'Refresh alt text would not change any cardImageAlt.';
+  const counts = data.counts || { added: 0, updated: 0, kept: 0, unchanged: 0, skipped: 0 };
+  const total = counts.added + counts.updated + counts.kept + (counts.unchanged || 0) + counts.skipped;
+  const parts = [];
+  if (counts.added) parts.push(`<strong>${counts.added}</strong> will get a new <code>cardImageAlt</code>`);
+  if (counts.updated) parts.push(`<strong>${counts.updated}</strong> will be updated`);
+  if (counts.kept) parts.push(`<strong>${counts.kept}</strong> keep their authored alt (no <code>dc:description</code> or <code>dc:title</code> in DAM)`);
+  if (counts.unchanged) parts.push(`<strong>${counts.unchanged}</strong> already match DAM`);
+  if (counts.skipped) parts.push(`<strong>${counts.skipped}</strong> cannot be checked and stay as they are`);
+  const summary = `Of <strong>${total}</strong> card image(s): ${parts.length ? parts.join('; ') : 'nothing to show'}. `
+    + (counts.added + counts.updated ? `<strong>${data.pagesWouldChange}</strong> page(s) would change.` : '<strong>No page would change.</strong>');
   host.innerHTML = `
     <div class="card mb-3" style="border-left:4px solid #fd7e14">
       <div class="card-header d-flex align-items-center gap-2 flex-wrap">
         <i class="bi bi-eye text-warning"></i><strong>cardImageAlt preview</strong>
-        <span class="text-muted small ms-1">— nothing has been changed. Review, then click Refresh alt text.</span>
+        <span class="text-muted small ms-1">— nothing has been changed. The <em>Final cardImageAlt</em> column is exactly what each page will have after Refresh alt text.</span>
         ${data.reportId ? `<a class="btn btn-sm btn-outline-secondary ms-auto" href="/api/link-checker/fix-report/${escHtml(data.reportId)}"><i class="bi bi-download me-1"></i>Download report (CSV)</a>` : ''}
         <button type="button" class="btn btn-sm btn-link text-muted p-0" title="Close preview" onclick="document.getElementById('lcAltPreview').style.display='none'"><i class="bi bi-x-lg"></i></button>
       </div>
@@ -2167,7 +2174,7 @@ function lcRenderAltPreview() {
         <div class="mb-2">${summary}</div>
         ${data.truncated ? `<div class="small text-muted mb-1">Showing the first ${(data.rows || []).length} of ${data.rowsTotal} rows — download the CSV for all.</div>` : ''}
         <div id="lcAltPreviewChips" class="mb-1"></div>
-        <input type="search" class="form-control form-control-sm mb-2" id="lcAltPreviewFilter" placeholder="Filter by page, image, current or new alt…" oninput="lcSetAltPreviewText(this.value)" />
+        <input type="search" class="form-control form-control-sm mb-2" id="lcAltPreviewFilter" placeholder="Filter by page, image, current or final alt…" oninput="lcSetAltPreviewText(this.value)" />
         <div id="lcAltPreviewRows"></div>
       </div>
     </div>`;
@@ -2179,29 +2186,34 @@ function lcRenderAltPreviewRows(limit = 500) {
   const rows = ((lcAltPreview.data && lcAltPreview.data.rows) || []).filter(lcAltPreviewVisible);
   const imageName = value => { try { return decodeURIComponent(String(value || '').split(/[?#]/)[0].split('/').filter(Boolean).pop() || ''); } catch { return String(value || ''); } };
   const body = rows.slice(0, limit).map(row => {
-    const meta = LC_ALT_STATUS[lcAltStatusKey(row)];
-    const showStatus = lcAltStatusKey(row) === 'attention' ? ` <span class="text-muted">${escHtml(row.status)}</span>` : '';
+    const key = lcAltStatusKey(row);
+    const meta = LC_ALT_STATUS[key];
+    const changes = key === 'added' || key === 'updated';
+    const current = row.currentAlt ? escHtml(row.currentAlt) : '<em class="text-muted">empty</em>';
+    const final = key === 'attention' && !row.finalAlt ? '<em class="text-muted">unchanged</em>'
+      : changes ? `<strong class="text-success">${escHtml(row.finalAlt)}</strong>`
+      : `${escHtml(row.finalAlt) || '<em class="text-muted">empty</em>'} <span class="text-muted">(no change)</span>`;
+    const why = key === 'attention' ? `${escHtml(row.source)}: ${escHtml(row.status)}` : escHtml(row.source);
     return `<tr>
       <td style="word-break:break-all"><code class="small text-secondary" title="${escHtml(row.file)}">${escHtml(lcShortPage(row.file))}</code></td>
       <td style="word-break:break-all"><span title="${escHtml(row.image)}">${escHtml(imageName(row.image))}</span></td>
-      <td class="text-muted">${escHtml(row.currentAlt) || '<em>none</em>'}</td>
-      <td class="text-success">${escHtml(row.newAlt)}</td>
-      <td class="text-nowrap">${escHtml(row.source)}</td>
-      <td class="text-nowrap"><span class="badge ${meta.cls}">${escHtml(meta.label)}</span>${showStatus}</td>
+      <td class="${changes ? 'text-decoration-line-through text-muted' : ''}">${current}</td>
+      <td>${final}</td>
+      <td><span class="badge ${meta.cls}">${escHtml(meta.label)}</span></td>
+      <td class="text-muted">${why}</td>
     </tr>`;
   }).join('');
   const target = document.getElementById('lcAltPreviewRows');
   if (!target) return;
   target.innerHTML = rows.length ? `
     <div style="max-height:440px;overflow:auto">
-      <table class="table table-sm table-hover small mb-0">
-        <thead class="table-light" style="position:sticky;top:0"><tr><th>Page</th><th>Image</th><th>Current cardImageAlt</th><th>New cardImageAlt</th><th>Source</th><th>Status</th></tr></thead>
+      <table class="table table-sm table-hover small mb-0 align-middle">
+        <thead class="table-light" style="position:sticky;top:0"><tr><th>Page</th><th>Image</th><th>Current cardImageAlt</th><th>Final cardImageAlt</th><th>Result</th><th>Why</th></tr></thead>
         <tbody>${body}</tbody>
       </table>
     </div>${rows.length > limit ? `<div class="small text-muted mt-1">Showing ${limit} of ${rows.length} matching rows — narrow the filter or download the CSV.</div>` : ''}`
     : '<div class="text-muted small">No rows match.</div>';
 }
-
 // ─── Migration QA report (dry-run preview) ────────────────────────────────────
 let lcReportData = null;
 let lcReportFilterCls = 'all';

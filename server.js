@@ -3557,7 +3557,9 @@ async function fetchDamAltText(damPaths, cfg) {
           const title = firstStr(resp.data['dc:title']);
           const text = description || title || fileBase(dp);
           const source = description ? 'description' : title ? 'title' : 'filename';
-          map.set(dp, text ? { text, source } : null);
+          // AI-generated text is never used for alt; it is kept only so the report can point it out.
+          const autogen = source === 'filename' ? (firstStr(resp.data['autogen:description']) || firstStr(resp.data['autogen:title'])) : '';
+          map.set(dp, text ? { text, source, autogen } : null);
         } else {
           map.set(dp, null);                 // asset not found / unreachable → no alt
         }
@@ -3575,8 +3577,8 @@ const xmlAttrUnescape = s => String(s).replace(/&quot;/g, '"').replace(/&lt;/g, 
 
 // DAM description/title override authored alt; filenames only fill unlabelled images.
 // A legacy plain alt is also refreshed on single-image nodes when the targets are unrestricted.
-function qaFixAltText(xml, altByValue) {
-  const changes = [], kept = [];
+function qaFixAltText(xml, altByValue, skipReasons = null) {
+  const changes = [], kept = [], same = [], skipped = [];
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)(\s*\/?)>/g;
   const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const result = xml.replace(elRe, (full, node, attrStr, tail) => {
@@ -3588,10 +3590,14 @@ function qaFixAltText(xml, altByValue) {
     const legacyAlt = !ALT_TARGETS && items.length === 1;
     for (const it of items) {
       const metadata = altByValue.get(it.value);
-      if (!metadata) continue;
+      if (!metadata) {
+        if (skipReasons && skipReasons.has(it.value))
+          skipped.push({ node, value: it.value, prop: it.prop, altProp: it.altRaw, oldAlt: it.altValue, reason: skipReasons.get(it.value) });
+        continue;
+      }
       const authoredAlt = (it.altValue || '').trim() || (legacyAlt && (attrs.alt || '').trim());
       if (metadata.source === 'filename' && authoredAlt) {
-        kept.push({ node, value: it.value, prop: it.prop, altProp: it.altRaw, oldAlt: (it.altValue || '').trim() ? it.altValue : attrs.alt });
+        kept.push({ node, value: it.value, prop: it.prop, altProp: it.altRaw, oldAlt: (it.altValue || '').trim() ? it.altValue : attrs.alt, autogen: metadata.autogen });
         continue;
       }
       const title = metadata.text;
@@ -3601,8 +3607,10 @@ function qaFixAltText(xml, altByValue) {
           out = out.replace(new RegExp('(\\s' + esc(it.altKey) + '=")[^"]*(")', 'i'), (_, prefix, suffix) => prefix + val + suffix);
         else
           out += ` ${it.altRaw}="${val}"`;
-        changes.push({ node, value: it.value, prop: it.prop, altProp: it.altRaw, alt: title, oldAlt: it.altValue, source: metadata.source });
+        changes.push({ node, value: it.value, prop: it.prop, altProp: it.altRaw, alt: title, oldAlt: it.altValue, source: metadata.source, autogen: metadata.autogen });
         changed = true;
+      } else {
+        same.push({ node, value: it.value, prop: it.prop, altProp: it.altRaw, oldAlt: it.altValue, source: metadata.source });
       }
       if (legacyAlt && attrs.alt !== undefined && attrs.alt !== val) {
         out = out.replace(/(\salt=")[^"]*(")/i, (_, prefix, suffix) => prefix + val + suffix);
@@ -3612,7 +3620,7 @@ function qaFixAltText(xml, altByValue) {
     }
     return changed ? `<${node}${out}${tail}>` : full;
   });
-  return { result, changes, kept };
+  return { result, changes, kept, same, skipped };
 }
 
 // Fill `caption` on custom-image blocks (only) whose caption is empty/absent, using
@@ -3643,7 +3651,7 @@ function qaFixCaption(xml, captionByValue, overwrite) {
 async function buildMetaFixedZip(buffer, fixerFn, { includePreview = false } = {}) {
   const outerAdm   = new AdmZip(buffer);
   const innerEntry = outerAdm.getEntries().find(e => !e.isDirectory && e.entryName.endsWith('.zip'));
-  const changes = [], kept = [];
+  const changes = [], kept = [], same = [], skipped = [];
   let pagesFixed = 0;
 
   async function patch(adm) {
@@ -3661,6 +3669,8 @@ async function buildMetaFixedZip(buffer, fixerFn, { includePreview = false } = {
           const after = lcIsSkipped(name) ? assembled : sanitizeXmlEntities(normalizeDeliveryUrls(assembled));
           for (const ch of r.changes) changes.push({ file, ...ch });
           for (const k of (r.kept || [])) kept.push({ file, ...k });
+          for (const s of (r.same || [])) same.push({ file, ...s });
+          for (const s of (r.skipped || [])) skipped.push({ file, ...s });
           if (after !== before) pagesFixed++;
           jsz.file(name, after);
           continue;
@@ -3678,9 +3688,9 @@ async function buildMetaFixedZip(buffer, fixerFn, { includePreview = false } = {
       if (e.isDirectory) continue;
       outerJsz.file(e.entryName, e.entryName === innerEntry.entryName ? patchedInner : e.getData());
     }
-    return { buf: await outerJsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), changes, kept, pagesFixed };
+    return { buf: await outerJsz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), changes, kept, same, skipped, pagesFixed };
   }
-  return { buf: await patch(outerAdm), changes, kept, pagesFixed };
+  return { buf: await patch(outerAdm), changes, kept, same, skipped, pagesFixed };
 }
 
 // Shared alt-refresh computation: scan all non-decorative component images,
@@ -3693,7 +3703,10 @@ async function computeAltFills(buffer, uuidToRow, damNorm, hostCfg) {
 
   const valueToDam = new Map();
   const skips = new Map();
+  const skipReasons = new Map();   // image value -> why no alt can be filled for it
   const addSkip = (reason, asset) => { if (!skips.has(reason)) skips.set(reason, new Set()); skips.get(reason).add(asset); };
+  const NOT_IN_MAP = 'not in asset-map (cannot locate /content/dam path)';
+  const NOT_ON_AUTHOR = 'asset not found on AEM author (no metadata)';
   const elRe = /<([a-zA-Z][\w:.\-]*)((?:\s+[\w:.\-]+="[^"]*")+)\s*\/?>/g;
   let candidateTotal = 0;
   for (const entry of zip.getEntries()) {
@@ -3709,7 +3722,7 @@ async function computeAltFills(buffer, uuidToRow, damNorm, hostCfg) {
       for (const it of imageAltProps(attrs, raw).filter(item => isAltTarget(m[1], item))) {
         candidateTotal++;
         const dam = altResolveDamPath(it.value, uuidToRow, damNorm);
-        if (!dam) { addSkip('not in asset-map (cannot locate /content/dam path)', it.value); continue; }
+        if (!dam) { addSkip(NOT_IN_MAP, it.value); skipReasons.set(it.value, NOT_IN_MAP); continue; }
         valueToDam.set(it.value, dam);
       }
     }
@@ -3720,9 +3733,9 @@ async function computeAltFills(buffer, uuidToRow, damNorm, hostCfg) {
   for (const [value, dam] of valueToDam) {
     const t = altByDam.get(dam);
     if (t) altByValue.set(value, t);
-    else addSkip('asset not found on AEM author (no metadata)', dam);
+    else { addSkip(NOT_ON_AUTHOR, dam); skipReasons.set(value, NOT_ON_AUTHOR); }
   }
-  return { altByValue, missingTotal: candidateTotal, skips };
+  return { altByValue, missingTotal: candidateTotal, skips, skipReasons };
 }
 
 // Caption-fill computation: scan the package for custom-image blocks with an empty caption,
@@ -3840,29 +3853,35 @@ app.post('/api/link-checker/fix-alt', express.json({ limit: '1mb' }), async (req
     const host = se?.aemUrl || appConfig?.target?.host;
     if (!host) return res.status(400).json({ error: `Environment "${env}" has no AEM host to read metadata from.` });
 
-    const { altByValue, missingTotal, skips } = await computeAltFills(buffer, uuidToRow, damNorm,
+    const { altByValue, missingTotal, skips, skipReasons } = await computeAltFills(buffer, uuidToRow, damNorm,
       { host, username: appConfig?.target?.username, password: appConfig?.target?.password });
 
-    const { buf, changes, kept, pagesFixed } = await buildMetaFixedZip(buffer, region => qaFixAltText(region, altByValue), { includePreview: true });
+    const { buf, changes, kept, same, skipped, pagesFixed } = await buildMetaFixedZip(buffer, region => qaFixAltText(region, altByValue, skipReasons), { includePreview: true });
 
-    // Change report: one row per cardImageAlt that is added, updated, kept or skipped.
-    const sourceLabel = { description: 'DAM description', title: 'DAM title', filename: 'filename' };
-    const reportRows = changes.map(c => ({
-      file: c.file, node: c.node, altProp: c.altProp, image: c.value,
-      currentAlt: c.oldAlt === undefined ? '' : xmlAttrUnescape(c.oldAlt), newAlt: c.alt,
-      source: sourceLabel[c.source] || '',
-      status: c.oldAlt === undefined || !String(c.oldAlt).trim() ? 'alt added' : 'alt updated',
-    }));
-    for (const k of kept) reportRows.push({
-      file: k.file, node: k.node, altProp: k.altProp, image: k.value,
-      currentAlt: xmlAttrUnescape(k.oldAlt || ''), newAlt: '', source: '', status: 'kept — DAM has no description or title',
-    });
-    for (const [reason, set] of skips) for (const asset of set)
-      reportRows.push({ file: '', node: '', altProp: '', image: asset, currentAlt: '', newAlt: '', source: '', status: reason });
+    // Report: one row per card image showing the alt it has now and the alt it will have after the refresh.
+    const NO_DC = 'dc:description and dc:title are empty in DAM';
+    const aiNote = autogen => autogen ? ` AI-generated text exists but is not used: "${autogen.length > 120 ? autogen.slice(0, 117) + '…' : autogen}".` : '';
+    const sourceLabel = { description: 'DAM description (dc:description)', title: 'DAM title (dc:title)', filename: 'Filename' };
+    const unesc = value => value === undefined ? '' : xmlAttrUnescape(value);
+    const base = item => ({ file: item.file, node: item.node, altProp: item.altProp, image: item.value, currentAlt: unesc(item.oldAlt) });
+    const reportRows = [
+      ...changes.map(c => {
+        const empty = c.oldAlt === undefined || !String(c.oldAlt).trim();
+        const field = sourceLabel[c.source] || '';
+        return { ...base(c), finalAlt: c.alt,
+          source: c.source === 'filename' ? `No authored alt — added from the filename: ${NO_DC}.${aiNote(c.autogen)}`
+            : empty ? `No authored alt — added the ${field}`
+            : `Authored alt is different from the ${field} — updating to the DAM value`,
+          status: empty ? 'alt added' : 'alt updated' };
+      }),
+      ...kept.map(k => ({ ...base(k), finalAlt: unesc(k.oldAlt), source: `Authored alt kept — ${NO_DC}.${aiNote(k.autogen)}`, status: 'kept — no dc:description or dc:title in DAM' })),
+      ...same.map(s => ({ ...base(s), finalAlt: unesc(s.oldAlt), source: `Authored alt and the ${s.source === 'filename' ? 'filename' : sourceLabel[s.source]} are the same — no change`, status: 'unchanged — already matches DAM' })),
+      ...skipped.map(s => ({ ...base(s), finalAlt: unesc(s.oldAlt), source: 'Alt not changed', status: s.reason })),
+    ];
     const reportCsv = stringify(reportRows, { header: true, columns: [
       { key: 'file', header: 'file' }, { key: 'node', header: 'component' }, { key: 'altProp', header: 'alt_property' },
-      { key: 'image', header: 'image' }, { key: 'currentAlt', header: 'current_alt' }, { key: 'newAlt', header: 'alt_text' },
-      { key: 'source', header: 'source' }, { key: 'status', header: 'status' },
+      { key: 'image', header: 'image' }, { key: 'currentAlt', header: 'current_alt' }, { key: 'finalAlt', header: 'final_alt' },
+      { key: 'source', header: 'reason' }, { key: 'status', header: 'status' },
     ] });
     const reportId = randomUUID();
     lcReports.set(reportId, reportCsv);
@@ -3873,7 +3892,10 @@ app.post('/api/link-checker/fix-alt', express.json({ limit: '1mb' }), async (req
       const ROW_LIMIT = 20000;
       return res.json({
         dryRun: true, pagesWouldChange: pagesFixed,
-        counts: { added: reportRows.filter(r => r.status === 'alt added').length, updated: reportRows.filter(r => r.status === 'alt updated').length, kept: kept.length, skipped: skippedCount },
+        counts: {
+          added: reportRows.filter(r => r.status === 'alt added').length, updated: reportRows.filter(r => r.status === 'alt updated').length,
+          kept: kept.length, unchanged: same.length, skipped: skipped.length,
+        },
         rowsTotal: reportRows.length, truncated: reportRows.length > ROW_LIMIT, rows: reportRows.slice(0, ROW_LIMIT), reportId,
       });
     }
